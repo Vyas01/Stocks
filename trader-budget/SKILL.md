@@ -34,7 +34,7 @@ python3 "${CLAUDE_SKILL_DIR}/size.py" --limit 364.00 --json  # a limit order at 
 python3 "${CLAUDE_SKILL_DIR}/size.py" --weights AAPL=40,KO=60 --config split.json   # weights mode, below
 ```
 
-`--now "2026-10-19 10:15"` pins the clock (New York time). A plan for
+`--now "2026-10-19 10:00"` pins the clock (India time). A plan for
 another day is refused: make a new one with trader-exit.
 
 ## What it reads and writes
@@ -59,7 +59,7 @@ If `trader/config.json` does not exist, copy `config.example.json` into
   budget), the biggest order ($4,000) and the smallest order ($5).
 - The day limits trader-risk enforces: **max_daily_loss_usd** (150), **max_trades_per_day** (3),
   **min_reward_risk** (1.0), **require_stop** (true), **no_entries_before** / **no_entries_after**
-  ("09:45" / "15:30") and **flat_by** ("15:55"), all New York time.
+  ("09:30" / "14:45") and **flat_by** ("15:15"), all India time.
 - **blocked**: tickers they never want to trade.
 - Keep **paper** true until they have watched it work on a paper account.
 
@@ -99,7 +99,7 @@ promise: in a fast market it can fill below the stop. Then hand over to
 
 ## Example: the reel
 
-TSLA on Monday 2026-10-19. Opening-range breakout: entry 364.18 at 10:15 AM,
+TSLA on Monday 2026-10-19. Opening-range breakout: entry 364.18 at 10:00 AM,
 stop 358.32 (the opening-range midpoint), target 370.04 (1R). Risk 5.86 a
 share. The example config: $5,000 budget, 10% cash buffer, $50 max loss.
 
@@ -117,12 +117,12 @@ share. The example config: $5,000 budget, 10% cash buffer, $50 max loss.
  "order_class": "bracket", "take_profit_limit_price": "370.04", "stop_loss_stop_price": "358.32",
  "why": "opening-range breakout on TSLA: 8 shares, bound by your $50 max loss per trade (8 x 5.86 = $46.88 at the stop)",
  "plan": {"entry": 364.18, "stop": 358.32, "target": 370.04, "risk_per_share": 5.86, "max_loss": 46.88,
-          "setup": "orb", "entry_time": "10:15 AM", "flat_by": "15:55"}}
+          "setup": "orb", "entry_time": "10:00 AM", "flat_by": "15:15"}}
 ```
 
 `why` and `plan` are notes for trader-risk and trader-broker. They are never
 sent to Alpaca. With the stop at 300.00 instead, one share would risk 64.18,
-more than the $50 max loss: no order. At 10:52 the real quote was 366.48, so
+more than the $50 max loss: no order. At 10:37 the real quote was 366.48, so
 the same plan sizes to 6 shares at 8.16 a share, and reward:risk falls to
 0.44: refused, because the move it was waiting for has mostly happened.
 

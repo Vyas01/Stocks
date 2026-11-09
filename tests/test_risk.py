@@ -14,11 +14,11 @@ ticket = load("trader-broker", "ticket")
 CFG_PATH = os.path.join(ROOT, "trader-budget", "config.example.json")
 TSLA_PATH = os.path.join(FIX, "trader-risk", "orders-tsla.json")
 V1_ORDERS_PATH = os.path.join(FIX, "trader-risk", "orders-reel.json")
-NOW = "2026-10-19 10:15"
+NOW = "2026-10-19 10:00"
 TODAY = "2026-10-19"
 V1_TODAY = "2026-10-13"
 PRICES = {"AAPL": 341.27, "AXP": 309.84, "GOOGL": 353.78, "KO": 90.11, "BAC": 53.96}
-QUOTE_TIME = datetime.datetime(2026, 10, 19, 14, 52, 13)   # Yahoo's TSLA quote 366.475, 10:52:13 New York
+QUOTE_TIME = datetime.datetime(2026, 10, 19, 5, 7, 13)   # the TSLA quote 366.475, 10:37:13 India time
 # v1's rules with every day-trade check switched off: the long-term checks still hold
 V1 = {"budget": 5000, "cash_buffer_pct": 10, "max_position_pct": 25, "max_order_usd": 2000, "min_order_usd": 5,
       "max_orders_per_day": 10, "require_stop": False, "no_entries_before": None, "no_entries_after": None,
@@ -127,7 +127,7 @@ class TheReel(unittest.TestCase):
             self.assertIn("PASS  #1 buy TSLA 8 shares, entry", text)
             self.assertIn("entry 364.18 (the plan's entry), stop 358.32, target 370.04: risk 5.86 a share", text)
             self.assertIn("max loss $46.88 (limit $50), reward:risk 1.00 (min 1)", text)
-            self.assertIn("1 passed, 0 blocked at 2026-10-19 10:15 New York", text)
+            self.assertIn("1 passed, 0 blocked at 2026-10-19 10:00 India", text)
             self.assertIn("not financial advice", text)
             with open(out) as fh:
                 rec = json.load(fh)
@@ -171,14 +171,14 @@ class DayTradeChecks(unittest.TestCase):
         self.assertEqual(verdicts(self.one(tsla(take_profit_limit_price="368.00"), min_reward_risk=0.5)), ["PASS"])
 
     def test_a_fresh_higher_price_is_the_entry(self):
-        later = at("2026-10-19 10:55")
+        later = at("2026-10-19 10:40")
         res = check.check([tsla()], cfg(), prices={"TSLA": 366.475}, now=later, price_times={"TSLA": QUOTE_TIME})
         r = res["results"][0]
         self.assertEqual((r["entry_ref"], r["entry_ref_from"], r["risk_per_share"]), (366.48, "price", 8.16))
         self.assertIn("loss: 8 shares x 8.16 risk a share = $65.28", reasons(res))
 
     def test_a_stale_or_future_price_is_not_used(self):
-        for now in ("2026-10-19 11:30", "2026-10-19 10:15"):
+        for now in ("2026-10-19 11:15", "2026-10-19 10:00"):
             res = check.check([tsla()], cfg(), prices={"TSLA": 366.475}, now=at(now),
                               price_times={"TSLA": QUOTE_TIME})
             self.assertEqual(verdicts(res), ["PASS"], now)
@@ -224,32 +224,34 @@ class DayTradeChecks(unittest.TestCase):
         self.assertIn("trades: 0 entries placed today plus 3 passed earlier", why)
         self.assertIn("daily loss: $120 already at risk today plus $40 for this one = $160", why)
 
-    def test_entry_window_new_york_time(self):
-        cases = [("2026-10-19 09:44", "no new entries before 09:45 New York (it is 09:44)"),
-                 ("2026-10-19 15:31", "no new entries after 15:30 New York (it is 15:31)"),
-                 ("2026-10-19 08:00", "the market is closed (Mon 2026-10-19 08:00"),
-                 ("2026-10-19 16:05", "the market is closed"),
-                 ("2026-10-17 10:15", "the market is closed today (weekend"),
-                 ("2026-11-26 10:15", "the market is closed today (NYSE holiday: Thanksgiving Day"),
-                 ("2026-11-27 12:31", "no new entries after 12:30 New York"),
-                 ("2026-11-27 13:05", "the market is closed"),
-                 ("2026-11-02T14:40:00Z", "no new entries before 09:45 New York (it is 09:40)")]
+    def test_entry_window_india_time(self):
+        cases = [("2026-10-19 09:29", "no new entries before 09:30 India (it is 09:29)"),
+                 ("2026-10-19 14:46", "no new entries after 14:45 India (it is 14:46)"),
+                 ("2026-10-19 07:45", "the market is closed (Mon 2026-10-19 07:45"),
+                 ("2026-10-19 15:30", "the market is closed (Mon 2026-10-19 15:30 India; the session is 09:15 to 15:30)"),
+                 ("2026-10-19 09:14", "the market is closed"),
+                 ("2026-10-17 10:00", "the market is closed today (weekend"),
+                 ("2026-11-24 10:00", "the market is closed today (NSE holiday: Guru Nanak Jayanti"),
+                 ("2026-10-20 10:00", "the market is closed today (NSE holiday: Dussehra"),
+                 ("2026-11-27 14:46", "no new entries after 14:45 India"),
+                 ("2026-11-27 15:45", "the market is closed"),
+                 ("2026-11-02T03:50:00Z", "no new entries before 09:30 India (it is 09:20)")]
         for now, want in cases:
             res = self.one(tsla(), now=now)
             self.assertIn("window: " + want, reasons(res), now)
-        for now in ("2026-10-19 09:45", "2026-10-19 15:30", "2026-11-27 12:30", "2026-11-02T15:15:00Z",
-                    "2026-10-30T14:40:00Z", "2026-03-09T13:50:00Z"):
+        for now in ("2026-10-19 09:30", "2026-10-19 14:45", "2026-11-27 12:15", "2026-11-02T04:00:00Z",
+                    "2026-10-30T09:15:00Z", "2026-03-09T09:15:00Z"):
             self.assertEqual(verdicts(self.one(tsla(), now=now)), ["PASS"], now)
-        self.assertIn("early close", " ".join(self.one(tsla(), now="2026-11-27 12:30")["warnings"]))
-        res = self.one(tsla(), now="2026-10-17 10:15", no_entries_before=None, no_entries_after=None)
+        self.assertNotIn("early close", " ".join(self.one(tsla(), now="2026-11-27 14:00")["warnings"]))   # the NSE has none
+        res = self.one(tsla(), now="2026-10-17 10:00", no_entries_before=None, no_entries_after=None)
         self.assertEqual(verdicts(res), ["PASS"])
         with self.assertRaises(check.RiskError):
             self.one(tsla(), no_entries_before="9.45am")
 
-    def test_the_window_uses_new_york_time_not_the_machine(self):
-        self.assertEqual(check.to_eastern(at("2026-10-19 10:15")), datetime.datetime(2026, 10, 19, 10, 15))
-        self.assertEqual(at("2026-10-19 10:15"), datetime.datetime(2026, 10, 19, 14, 15))
-        self.assertEqual(at("2026-12-01 10:15"), datetime.datetime(2026, 12, 1, 15, 15))
+    def test_the_window_uses_india_time_not_the_machine(self):
+        self.assertEqual(check.to_eastern(at("2026-10-19 10:00")), datetime.datetime(2026, 10, 19, 10, 0))
+        self.assertEqual(at("2026-10-19 10:00"), datetime.datetime(2026, 10, 19, 4, 30))
+        self.assertEqual(at("2026-12-01 10:00"), datetime.datetime(2026, 12, 1, 4, 30))      # no daylight saving
 
     def test_pdt_guard(self):
         def trade(day):
@@ -311,14 +313,14 @@ class Exits(unittest.TestCase):
                           [placed("T%d" % i, max_loss=1) for i in range(6)] +
                           [placed("TSLA", side="sell", kind="exit", max_loss=None)]}
         c = cfg(blocked=["TSLA"], max_order_usd=100, max_daily_loss_usd=50)
-        res = check.check([self.SELL], c, portfolio=self.PF, state=full, now=at("2026-10-19 15:58"))
+        res = check.check([self.SELL], c, portfolio=self.PF, state=full, now=at("2026-10-19 15:43"))
         r = res["results"][0]
         self.assertEqual((r["verdict"], r["kind"]), ("PASS", "exit"), r["reasons"])
         why = warnings(res)
         for word in ("blocked:", "duplicate:", "daily limit:"):
             self.assertIn("exit, not blocked: " + word, why)
         self.assertNotIn("price", why)
-        res = check.check([self.SELL], cfg(), portfolio=self.PF, now=at("2026-10-17 12:00"))
+        res = check.check([self.SELL], cfg(), portfolio=self.PF, now=at("2026-10-17 11:45"))
         self.assertEqual(verdicts(res), ["PASS"])
 
     def test_a_partial_exit_and_the_rest(self):
@@ -465,18 +467,18 @@ class Cli(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             pp = os.path.join(d, "prices.json")
             with open(pp, "w") as fh:
-                json.dump({"as_of": "2026-10-19T14:55:00Z", "prices": {"TSLA": 366.475},
-                           "detail": {"TSLA": {"time": "2026-10-19T14:52:13Z", "fetched": "2026-10-19T14:55:00Z"}}},
+                json.dump({"as_of": "2026-10-19T05:10:00Z", "prices": {"TSLA": 366.475},
+                           "detail": {"TSLA": {"time": "2026-10-19T05:07:13Z", "fetched": "2026-10-19T05:10:00Z"}}},
                           fh)
             none = os.path.join(d, "none")
             base = ["--orders", TSLA_PATH, "--config", CFG_PATH, "--portfolio", none, "--prices", pp,
                     "--state", none, "--no-write"]
             buf = io.StringIO()
             with redirect_stdout(buf):
-                self.assertEqual(check.main(base + ["--now", "2026-10-19 10:55"]), 1)
+                self.assertEqual(check.main(base + ["--now", "2026-10-19 10:40"]), 1)
             self.assertIn("8 shares x 8.16 risk a share = $65.28", buf.getvalue())
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(check.main(base + ["--now", "2026-10-19 11:30"]), 0)
+                self.assertEqual(check.main(base + ["--now", "2026-10-19 11:15"]), 0)
 
     def test_v1_orders_with_a_v1_config_file(self):
         with tempfile.TemporaryDirectory() as d:
@@ -517,6 +519,22 @@ class Cli(unittest.TestCase):
         with redirect_stderr(err):
             self.assertEqual(check.main(["--orders", TSLA_PATH, "--today", "monday", "--no-write"]), 1)
         self.assertIn("--today wants", err.getvalue())
+
+
+
+class DotNs(unittest.TestCase):
+    def test_the_ticker_pattern(self):
+        for ok in ("RELIANCE.NS", "M&M.NS", "BAJAJ-AUTO.NS", "20MICRONS.NS", "TSLA", "BRK.B"):
+            self.assertTrue(check.TICKER.match(ok), ok)
+        for bad in ("RELIANCE.NSE", "RELIANCE.", "ABC$D", "reliance.ns", "TOOLONGTICKER"):
+            self.assertFalse(check.TICKER.match(bad), bad)
+
+    def test_a_dot_ns_order_is_not_refused_as_a_strange_ticker(self):
+        res = check.check([tsla(symbol="RELIANCE.NS")], cfg(), now=at(NOW))
+        self.assertNotIn("does not look like", " ".join(res["results"][0]["reasons"]))
+        res = check.check([tsla(symbol="RELIANCE.NSE")], cfg(), now=at(NOW))
+        self.assertIn("does not look like a stock or ETF ticker (NSE symbols end in .NS)",
+                      " ".join(res["results"][0]["reasons"]))
 
 
 if __name__ == "__main__":

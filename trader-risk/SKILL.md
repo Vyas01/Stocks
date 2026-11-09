@@ -32,7 +32,7 @@ keep each loss and each day's losses small. They do not make a trade win.
 python3 "${CLAUDE_SKILL_DIR}/check.py"                           # trader/ files; writes trader/state/risk.json
 python3 "${CLAUDE_SKILL_DIR}/check.py" --json
 python3 "${CLAUDE_SKILL_DIR}/check.py" --no-write                # look without recording
-python3 "${CLAUDE_SKILL_DIR}/check.py" --now "2026-10-19 10:15"  # pin the clock (New York time)
+python3 "${CLAUDE_SKILL_DIR}/check.py" --now "2026-10-19 10:00"  # pin the clock (India time)
 ```
 
 ## What it reads and writes
@@ -82,14 +82,14 @@ How the numbers work:
 
 - **The entry it measures from**: the limit price for a limit order. For a
   market order, the HIGHER of the plan's entry and a fresh price from
-  `trader/prices.json` (under 15 minutes old). A plan written at 10:15 cannot
-  understate the risk at 10:55 after the price ran up. An older price is not
+  `trader/prices.json` (under 15 minutes old). A plan written at 10:00 cannot
+  understate the risk at 10:40 after the price ran up. An older price is not
   used, and it says so.
 - **Daily loss** counts the full max loss of every entry placed today, win or
   lose, as trader-broker logged it. Three full-size trades use up a $150 day.
-- **The window** is New York time, worked out in the tool (daylight saving
-  included), never from the computer's clock zone. Weekends and NYSE holidays
-  are closed. On a 1:00 p.m. early close the window ends 3 hours earlier too.
+- **The window** is India time (UTC+5:30, no daylight saving), worked out in the tool,
+  never from the computer's clock zone. The session is 9:15 to 15:30; weekends and NSE holidays
+  are closed. The NSE has no early close.
   Set both `no_entries_*` to null to switch the window off.
 - **pdt_guard** (off by default) counts a day trade as a symbol bought and
   sold on the same day in the log, plus any entry placed today (it is meant
@@ -100,7 +100,7 @@ How the numbers work:
 
 Warnings do not block, but say them to the user: a LIVE account, a number
 sent as a number instead of a string, a stop that lives only in the plan and
-not at the broker, a price too old to use, an early close today.
+not at the broker, a price too old to use.
 
 ## Steps
 
@@ -119,7 +119,7 @@ not at the broker, a price too old to use, an early close today.
 
 ## Example: the reel
 
-The TSLA bracket from trader-budget at 10:15 AM on Monday 2026-10-19, on a
+The TSLA bracket from trader-budget at 10:00 AM on Monday 2026-10-19, on a
 fresh $5,000 paper account with the example config:
 
 ```
@@ -128,7 +128,7 @@ PASS  #1 buy TSLA 8 shares, entry
           max loss $46.88 (limit $50), reward:risk 1.00 (min 1)
           today before this: 0 of 3 trades, $0 of $150 daily loss
 
-1 passed, 0 blocked at 2026-10-19 10:15 New York. Cash after the passed orders: $2,086.56 (paper account).
+1 passed, 0 blocked at 2026-10-19 10:00 India. Cash after the passed orders: $2,086.56 (paper account).
 ```
 
 One more share and it is blocked:
@@ -141,11 +141,11 @@ BLOCK #1 buy TSLA 9 shares, entry
         - loss: 9 shares x 5.86 risk a share = $52.74 at the stop, over your $50 max loss per trade
 ```
 
-The same 8 shares checked at 10:55 with the real 10:52 quote (366.48) in
+The same 8 shares checked at 10:40 with the real 10:37 quote (366.48) in
 `trader/prices.json` are blocked twice: 8 x 8.16 = $65.28 at the stop, and
-reward:risk 0.44. At 9:40 they are blocked by the window (no new entries
-before 9:45). The 3:55 PM sell that closes the position passes, even though
-it is after the 3:30 entry cutoff: it is an exit.
+reward:risk 0.44. At 9:25 they are blocked by the window (no new entries
+before 9:30). The 3:15 PM sell that closes the position passes, even though
+it is after the 14:45 entry cutoff: it is an exit.
 
 ## Rules
 

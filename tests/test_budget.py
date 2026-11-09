@@ -13,7 +13,7 @@ CFG = os.path.join(ROOT, "trader-budget", "config.example.json")
 PLAN = os.path.join(FIX, "trader-budget", "plan-tsla.json")
 TARGETS = os.path.join(ROOT, "trader-budget", "targets.example.json")
 TOP5 = os.path.join(FIX, "trader-budget", "berkshire-q2-2026-top5.json")
-NOW = "2026-10-19 10:15"
+NOW = "2026-10-19 10:00"
 TODAY = "2026-10-19"
 REEL_V1 = {"AAPL": 1250, "AXP": 1119, "GOOGL": 823, "KO": 708, "BAC": 600}
 PRICES = {"AAPL": 341.27, "AXP": 309.84, "GOOGL": 353.78, "KO": 90.11, "BAC": 53.96}
@@ -22,7 +22,7 @@ CONTRACT_CFG = {
     "budget": 5000, "cash_buffer_pct": 10, "max_position_pct": 75, "max_order_usd": 4000, "min_order_usd": 5,
     "max_loss_per_trade_usd": 50, "max_daily_loss_usd": 150, "max_trades_per_day": 3, "max_orders_per_day": 10,
     "min_reward_risk": 1.0, "require_stop": True,
-    "no_entries_before": "09:45", "no_entries_after": "15:30", "flat_by": "15:55",
+    "no_entries_before": "09:30", "no_entries_after": "14:45", "flat_by": "15:15",
     "fractional": False, "broker": "alpaca", "paper": True, "blocked": [],
     "allow_options": False, "allow_margin": False, "allow_short": False, "pdt_guard": False,
     "sec_user_agent": "Your Name you@example.com",
@@ -68,7 +68,7 @@ def run(argv):
     return code, out.getvalue(), err.getvalue()
 
 
-def prices_doc(price, quote_time="2026-10-19T14:52:13Z"):
+def prices_doc(price, quote_time="2026-10-19T05:07:13Z"):
     return {"as_of": quote_time, "source": "yahoo", "prices": {"TSLA": price},
             "detail": {"TSLA": {"prev_close": 354.72, "time": quote_time, "source": "yahoo"}}}
 
@@ -101,7 +101,7 @@ class TheReel(unittest.TestCase):
             "symbol": "TSLA", "side": "buy", "qty": "8", "type": "market", "time_in_force": "day",
             "order_class": "bracket", "take_profit_limit_price": "370.04", "stop_loss_stop_price": "358.32",
             "plan": {"entry": 364.18, "stop": 358.32, "target": 370.04, "risk_per_share": 5.86,
-                     "max_loss": 46.88, "setup": "orb", "entry_time": "10:15 AM", "flat_by": "15:55"}})
+                     "max_loss": 46.88, "setup": "orb", "entry_time": "10:00 AM", "flat_by": "15:15"}})
         self.assertIn("bound by your $50 max loss", why)
         self.assertIn("$46.88", why)
 
@@ -131,7 +131,7 @@ class TheReel(unittest.TestCase):
                 doc = json.load(fh)
             self.assertEqual(doc["status"], "proposed")
             self.assertIs(doc["paper"], True)
-            self.assertEqual(doc["created_at"], "2026-10-19T14:15:00Z")
+            self.assertEqual(doc["created_at"], "2026-10-19T04:30:00Z")
             self.assertEqual(len(doc["orders"]), 1)
             self.assertEqual(doc["orders"][0]["plan"]["max_loss"], 46.88)
 
@@ -188,11 +188,11 @@ class PlanRules(unittest.TestCase):
             with open(pp, "w") as fh:
                 json.dump(prices_doc(366.475), fh)
             base = ["--plan", PLAN, "--config", CFG, "--portfolio", os.path.join(d, "none"), "--prices", pp, "--json"]
-            code, text, _ = run(base + ["--now", "2026-10-19 10:55"])
+            code, text, _ = run(base + ["--now", "2026-10-19 10:40"])
             out = json.loads(text)
             self.assertEqual((code, out["sizing"]["qty"], out["orders"]), (1, 6, []))
             self.assertIn("above the plan's entry", out["notes"][0])
-            out = json.loads(run(base + ["--now", "2026-10-19 11:30"])[1])
+            out = json.loads(run(base + ["--now", "2026-10-19 11:15"])[1])
             self.assertEqual(out["sizing"]["qty"], 8)
             self.assertIn("not used", out["notes"][0])
 
