@@ -20,9 +20,9 @@ V1_TODAY = "2026-10-13"
 PRICES = {"AAPL": 341.27, "AXP": 309.84, "GOOGL": 353.78, "KO": 90.11, "BAC": 53.96}
 QUOTE_TIME = datetime.datetime(2026, 10, 19, 5, 7, 13)   # the TSLA quote 366.475, 10:37:13 India time
 # v1's rules with every day-trade check switched off: the long-term checks still hold
-V1 = {"budget": 5000, "cash_buffer_pct": 10, "max_position_pct": 25, "max_order_usd": 2000, "min_order_usd": 5,
+V1 = {"budget": 5000, "cash_buffer_pct": 10, "max_position_pct": 25, "max_order_inr": 2000, "min_order_inr": 5,
       "max_orders_per_day": 10, "require_stop": False, "no_entries_before": None, "no_entries_after": None,
-      "max_trades_per_day": 0, "max_daily_loss_usd": 0, "max_loss_per_trade_usd": 0, "min_reward_risk": 0}
+      "max_trades_per_day": 0, "max_daily_loss_inr": 0, "max_loss_per_trade_inr": 0, "min_reward_risk": 0}
 
 
 def at(text):
@@ -61,8 +61,8 @@ def v1_orders():
         return json.load(fh)["orders"]
 
 
-def buy(sym, usd):
-    return {"symbol": sym, "side": "buy", "notional": str(usd), "type": "market", "time_in_force": "day"}
+def buy(sym, inr):
+    return {"symbol": sym, "side": "buy", "notional": str(inr), "type": "market", "time_in_force": "day"}
 
 
 def placed(sym, side="buy", day=TODAY, max_loss=46.88, kind=None, status="placed"):
@@ -95,7 +95,7 @@ class TheReel(unittest.TestCase):
         self.assertEqual(r["warnings"], [])
         self.assertEqual((r["kind"], r["entry_ref"], r["stop"], r["target"]), ("entry", 364.18, 358.32, 370.04))
         self.assertEqual((r["risk_per_share"], r["max_loss"], r["reward_risk"]), (5.86, 46.88, 1.0))
-        self.assertEqual(r["value_usd"], 2913.44)
+        self.assertEqual(r["value_inr"], 2913.44)
         self.assertEqual(res["cash_after"], 2086.56)
         self.assertEqual(res["date"], TODAY)
         self.assertIs(res["paper"], True)
@@ -104,7 +104,7 @@ class TheReel(unittest.TestCase):
         res = check.check([tsla(qty="9")], cfg(), now=at(NOW))
         self.assertEqual(verdicts(res), ["BLOCK"])
         self.assertEqual(res["results"][0]["reasons"],
-                         ["loss: 9 shares x 5.86 risk a share = $52.74 at the stop, over your $50 max loss per trade"])
+                         ["loss: 9 shares x 5.86 risk a share = ₹52.74 at the stop, over your ₹50 max loss per trade"])
 
     def test_fingerprint_is_shared_with_the_broker(self):
         o = tsla()
@@ -126,7 +126,7 @@ class TheReel(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn("PASS  #1 buy TSLA 8 shares, entry", text)
             self.assertIn("entry 364.18 (the plan's entry), stop 358.32, target 370.04: risk 5.86 a share", text)
-            self.assertIn("max loss $46.88 (limit $50), reward:risk 1.00 (min 1)", text)
+            self.assertIn("max loss ₹46.88 (limit ₹50), reward:risk 1.00 (min 1)", text)
             self.assertIn("1 passed, 0 blocked at 2026-10-19 10:00 India", text)
             self.assertIn("not financial advice", text)
             with open(out) as fh:
@@ -175,7 +175,7 @@ class DayTradeChecks(unittest.TestCase):
         res = check.check([tsla()], cfg(), prices={"TSLA": 366.475}, now=later, price_times={"TSLA": QUOTE_TIME})
         r = res["results"][0]
         self.assertEqual((r["entry_ref"], r["entry_ref_from"], r["risk_per_share"]), (366.48, "price", 8.16))
-        self.assertIn("loss: 8 shares x 8.16 risk a share = $65.28", reasons(res))
+        self.assertIn("loss: 8 shares x 8.16 risk a share = ₹65.28", reasons(res))
 
     def test_a_stale_or_future_price_is_not_used(self):
         for now in ("2026-10-19 11:15", "2026-10-19 10:00"):
@@ -199,12 +199,12 @@ class DayTradeChecks(unittest.TestCase):
         two = {"orders": [placed("AAPL"), placed("AMD")]}
         res = check.check([tsla()], cfg(), state=two, now=at(NOW))
         self.assertEqual(verdicts(res), ["PASS"])
-        self.assertIn("today before this: 2 of 3 trades, $93.76 of $150 daily loss", res["results"][0]["info"][-1])
+        self.assertIn("today before this: 2 of 3 trades, ₹93.76 of ₹150 daily loss", res["results"][0]["info"][-1])
         three = {"orders": [placed("AAPL"), placed("AMD"), placed("NVDA")]}
         res = check.check([tsla()], cfg(), state=three, now=at(NOW))
         why = reasons(res)
         self.assertIn("trades: 3 entries placed today", why)
-        self.assertIn("daily loss: $140.64 already at risk today plus $46.88 for this one = $187.52, over your $150",
+        self.assertIn("daily loss: ₹140.64 already at risk today plus ₹46.88 for this one = ₹187.52, over your ₹150",
                       why)
         yesterday = {"orders": [placed(s, day="2026-10-16") for s in ("AAPL", "AMD", "NVDA")]}
         self.assertEqual(verdicts(check.check([tsla()], cfg(), state=yesterday, now=at(NOW))), ["PASS"])
@@ -222,7 +222,7 @@ class DayTradeChecks(unittest.TestCase):
         self.assertEqual(verdicts(res), ["PASS", "PASS", "PASS", "BLOCK"])
         why = reasons(res, 3)
         self.assertIn("trades: 0 entries placed today plus 3 passed earlier", why)
-        self.assertIn("daily loss: $120 already at risk today plus $40 for this one = $160", why)
+        self.assertIn("daily loss: ₹120 already at risk today plus ₹40 for this one = ₹160", why)
 
     def test_entry_window_india_time(self):
         cases = [("2026-10-19 09:29", "no new entries before 09:30 India (it is 09:29)"),
@@ -312,7 +312,7 @@ class Exits(unittest.TestCase):
         full = {"orders": [placed("TSLA"), placed("AMD"), placed("NVDA")] +
                           [placed("T%d" % i, max_loss=1) for i in range(6)] +
                           [placed("TSLA", side="sell", kind="exit", max_loss=None)]}
-        c = cfg(blocked=["TSLA"], max_order_usd=100, max_daily_loss_usd=50)
+        c = cfg(blocked=["TSLA"], max_order_inr=100, max_daily_loss_inr=50)
         res = check.check([self.SELL], c, portfolio=self.PF, state=full, now=at("2026-10-19 15:43"))
         r = res["results"][0]
         self.assertEqual((r["verdict"], r["kind"]), ("PASS", "exit"), r["reasons"])
@@ -357,8 +357,8 @@ class V1Checks(unittest.TestCase):
         res = check.check(v1_orders(), v1(), today=V1_TODAY)
         self.assertEqual(verdicts(res), ["PASS"] * 5)
         self.assertEqual(res["cash_after"], 500)
-        self.assertEqual(res["results"][0]["value_usd"], 1250)
-        self.assertEqual(res["results"][0]["amount"], "$1,250")
+        self.assertEqual(res["results"][0]["value_inr"], 1250)
+        self.assertEqual(res["results"][0]["amount"], "₹1,250")
 
     def test_a_sixth_buy_is_blocked_three_ways(self):
         res = check.check(v1_orders() + [buy("AAPL", 100)], v1(), today=V1_TODAY)
@@ -374,8 +374,8 @@ class V1Checks(unittest.TestCase):
         self.assertIn("stop: no stop", reasons(res))
 
     def test_max_and_min_order(self):
-        self.assertIn("over your $2,000 max order", " ".join(self.one(buy("KO", 2500), max_position_pct=100)["reasons"]))
-        self.assertIn("under your $5 minimum", " ".join(self.one(buy("KO", 2))["reasons"]))
+        self.assertIn("over your ₹2,000 max order", " ".join(self.one(buy("KO", 2500), max_position_pct=100)["reasons"]))
+        self.assertIn("under your ₹5 minimum", " ".join(self.one(buy("KO", 2))["reasons"]))
 
     def test_blocked_list(self):
         r = self.one(buy("KO", 100), blocked=["KO"])
@@ -417,7 +417,7 @@ class V1Checks(unittest.TestCase):
         q["symbol"] = "KO"
         r = self.one(q)
         self.assertEqual(r["verdict"], "PASS")
-        self.assertAlmostEqual(r["value_usd"], 180.22)
+        self.assertAlmostEqual(r["value_inr"], 180.22)
 
     def test_margin(self):
         r = check.check([buy("KO", 1500)], v1(cash_buffer_pct=0, max_position_pct=100),
@@ -476,7 +476,7 @@ class Cli(unittest.TestCase):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 self.assertEqual(check.main(base + ["--now", "2026-10-19 10:40"]), 1)
-            self.assertIn("8 shares x 8.16 risk a share = $65.28", buf.getvalue())
+            self.assertIn("8 shares x 8.16 risk a share = ₹65.28", buf.getvalue())
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(check.main(base + ["--now", "2026-10-19 11:15"]), 0)
 

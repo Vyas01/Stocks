@@ -291,7 +291,7 @@ class Daily(unittest.TestCase):
         # meta is Yahoo's as of 10:35 AM Monday, so the volume is the day's so far
         hits, counts, _ = scan.scan_daily(self.data, self.syms, scan.parse_now("2026-10-19 10:35"), 5, 1000000)
         self.assertEqual(sorted(h["symbol"] for h in hits), ["BAC", "CCL", "F", "JPM", "KO", "RIVN", "XOM"])
-        self.assertEqual(counts["illiquid"], 8)     # PLUG under $5; BLK, CI, HD, RCL, GE, MS, PNC under 1M so far
+        self.assertEqual(counts["illiquid"], 8)     # PLUG under ₹5; BLK, CI, HD, RCL, GE, MS, PNC under 1M so far
         self.assertEqual(counts["scanned"], 11)
 
     def test_short_and_empty_charts(self):
@@ -341,7 +341,7 @@ class Orb(unittest.TestCase):
 
     def test_price_floor(self):
         hits, counts, _ = self.scan_at("2026-10-19 10:00", min_price=5)
-        self.assertEqual(len(hits), 41)                    # AMC at $2.97 drops out
+        self.assertEqual(len(hits), 41)                    # AMC at ₹2.97 drops out
         self.assertEqual(counts["illiquid"], 9)
         self.assertNotIn("AMC", [h["symbol"] for h in hits])
 
@@ -461,7 +461,7 @@ class LiveFiveMinute(unittest.TestCase):
         self.assertEqual(hits, [{"symbol": "TSLA", "setups": ["orb"], "price": 370.58, "at": "9:45 AM",
                                  "bar_start": "09:40", "bar_index": 5, "or_high": 370.49, "or_low": 363.64,
                                  "pct_over": 0.03}])
-        self.assertEqual(counts["illiquid"], 1)            # AMC under the $5 floor
+        self.assertEqual(counts["illiquid"], 1)            # AMC under the ₹5 floor
 
     def test_stage_two_cap_takes_the_most_traded(self):
         data, _ = scan.load_offline(WALL)
@@ -528,7 +528,7 @@ class Cli(unittest.TestCase):
                              "--out", self.wl])
         self.assertEqual(code, 0)
         self.assertIn("42 of 231 charts closed above their opening-range high by 10:00 AM", text)
-        self.assertIn("10:00 AM  TSLA      $364.18  range 354.47 to 362.18  +0.55% over", text)
+        self.assertIn("10:00 AM  TSLA      ₹364.18  range 354.47 to 362.18  +0.55% over", text)
         self.assertIn("not a list of stocks to buy", text)
         doc = self.read(self.wl)
         self.assertEqual({k: doc[k] for k in ("created_by", "created_at", "mode", "as_of", "universe", "scanned",

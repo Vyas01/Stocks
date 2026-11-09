@@ -163,7 +163,7 @@ def tool_input(order):
 def _money(v):
     f = float(v)
     s = "{:,.2f}".format(f)
-    return "$" + (s[:-3] if s.endswith(".00") else s)
+    return "₹" + (s[:-3] if s.endswith(".00") else s)
 
 
 def _p(v):
@@ -630,7 +630,17 @@ def cmd_log(a):
     return 0
 
 
+def _utf8():
+    """The rupee sign needs UTF-8; a pipe or console on a legacy code page (older Windows) would choke on it."""
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
 def main(argv=None):
+    _utf8()
     ap = argparse.ArgumentParser(description="Order tickets and your yes (trader-broker). Never places orders.")
     sub = ap.add_subparsers(dest="cmd")
 

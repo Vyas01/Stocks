@@ -766,7 +766,7 @@ def write_json(path, doc):
 
 
 def money(x):
-    return "${:,.2f}".format(x)
+    return "₹{:,.2f}".format(x)
 
 
 # ---------------------------------------------------------------- commands
@@ -839,7 +839,7 @@ def cmd_daily(a):
     local = to_eastern(now)
     print("Daily scan, %s IST, closes through %s (Yahoo spark, daily closes only)." % (
         local.strftime("%a %Y-%m-%d %H:%M"), last_date.isoformat() if last_date else "nothing"))
-    print("Fetched %s of %s charts%s. %s passed the liquidity filter ($%s+ and %s+ shares)%s; "
+    print("Fetched %s of %s charts%s. %s passed the liquidity filter (₹%s+ and %s+ shares)%s; "
           "%s scanned." % ("{:,}".format(counts["fetched"]), "{:,}".format(len(symbols)),
                            (" (%s failed or had no data)" % "{:,}".format(nfailed)) if nfailed else "",
                            "{:,}".format(counts["fetched"] - counts["illiquid"]), _n(a.min_price),
@@ -957,7 +957,17 @@ def _p(x):
     return "{:,.2f}".format(x)
 
 
+def _utf8():
+    """The rupee sign needs UTF-8; a pipe or console on a legacy code page (older Windows) would choke on it."""
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
 def main(argv=None):
+    _utf8()
     ap = argparse.ArgumentParser(description="Chart Scanner (trader-scanner): daily setups and opening-range breakouts.")
     sub = ap.add_subparsers(dest="cmd")
 
