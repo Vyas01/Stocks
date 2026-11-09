@@ -21,7 +21,7 @@ only; every other rule turns into a warning for it.
 What blocks an order (every order):
 
   format        missing symbol or side, both or neither of qty / notional,
-                notional on anything but a market day order (Alpaca's rule),
+                notional on anything but a market day order,
                 a limit order without a limit price, unknown type; a bracket
                 that is not whole shares, not day / gtc, or misses a leg
   asset         options (OCC symbols) unless "allow_options": true; crypto
@@ -71,10 +71,10 @@ DEFAULTS = {
     "min_order_inr": 5, "max_loss_per_trade_inr": 50, "max_daily_loss_inr": 150, "max_trades_per_day": 3,
     "max_orders_per_day": 10, "min_reward_risk": 1.0, "require_stop": True,
     "no_entries_before": "09:30", "no_entries_after": "14:45", "flat_by": "15:15",
-    "paper": True, "blocked": [], "allow_options": False, "allow_margin": False, "allow_short": False,
+    "paper": False, "blocked": [], "allow_options": False, "allow_margin": False, "allow_short": False,
     "pdt_guard": False,
 }
-ALPACA_FIELDS = ("symbol", "side", "qty", "notional", "type", "time_in_force", "limit_price",
+ORDER_FIELDS = ("symbol", "side", "qty", "notional", "type", "time_in_force", "limit_price",
                  "stop_price", "trail_price", "trail_percent", "extended_hours", "client_order_id",
                  "order_class", "take_profit_limit_price", "stop_loss_stop_price",
                  "stop_loss_limit_price", "advanced_instructions")
@@ -245,7 +245,7 @@ def read_json(path, what, required=True):
 
 def fingerprint(order):
     """Same function in trader-broker/ticket.py: the exact order that was checked."""
-    core = {k: order[k] for k in ALPACA_FIELDS if k in order and order[k] is not None}
+    core = {k: order[k] for k in ORDER_FIELDS if k in order and order[k] is not None}
     blob = json.dumps(core, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -375,7 +375,7 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
     seen = set()
     results = []
     batch_entries, batch_loss = 0, 0.0
-    if not c.get("paper", True):
+    if not c.get("paper", False):
         top_warn.append("LIVE account (\"paper\": false): these orders use real money")
     top_warn.extend(win_warns)
 
@@ -417,14 +417,14 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                 if v is None or v <= 0:
                     reasons.append("format: %s must be a positive number, got %r" % (k, o.get(k)))
                 elif not isinstance(o.get(k), str):
-                    warns.append("send %s as a string (\"%s\"), the way place_stock_order types it"
+                    warns.append("send %s as a string (\"%s\"), the way the order format types it"
                                  % (k, o.get(k)))
         if typ not in TYPES:
             reasons.append("format: unknown order type %r" % typ)
         if tif not in TIFS:
             reasons.append("format: unknown time_in_force %r" % tif)
         if notional is not None and (typ != "market" or tif != "day"):
-            reasons.append("format: a notional (dollar) order must be a market order with time_in_force day")
+            reasons.append("format: a notional (rupee) order must be a market order with time_in_force day")
         if typ in ("limit", "stop_limit") and o.get("limit_price") is None:
             reasons.append("format: a %s order needs a limit_price" % typ)
         if typ in ("stop", "stop_limit") and o.get("stop_price") is None:
@@ -669,7 +669,7 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
     return {
         "date": today,
         "now_new_york": now_et.strftime("%Y-%m-%d %H:%M"),
-        "paper": bool(c.get("paper", True)),
+        "paper": bool(c.get("paper", False)),
         "results": results,
         "pass": sum(1 for r in results if r["verdict"] == "PASS"),
         "block": sum(1 for r in results if r["verdict"] == "BLOCK"),

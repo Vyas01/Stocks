@@ -4,7 +4,7 @@
 Default mode: sizes ONE day trade from trader/plan.json (written by
 trader-exit) to your budget and your max loss per trade, then writes one
 bracket order (entry, stop-loss, take-profit) to trader/orders.json in the
-shape of Alpaca's place_stock_order. It never places anything: trader-risk
+format (field names as in Alpaca's place_stock_order; trader-broker turns it into Groww calls). It never places anything: trader-risk
 checks the order and trader-broker asks you yes or no.
 
     python3 size.py                                  # trader/plan.json + trader/config.json
@@ -13,7 +13,7 @@ checks the order and trader-broker asks you yes or no.
     python3 size.py --limit 364.00 --write           # a limit order at 364.00
     python3 size.py --now "2026-10-19 10:15" --json  # pin the clock (India time)
 
-How many shares. Whole shares only: Alpaca takes no fractions in a bracket.
+How many shares. Whole shares only: Groww takes no fractions.
 
     shares = floor of the smallest of
       max loss       max_loss_per_trade_inr / risk per share (entry minus stop)
@@ -44,8 +44,8 @@ list of stocks by weight.
                    weight, again and again until nobody is over
   4. min order     a slice under min_order_inr is dropped and its weight
                    shared out, so you never place a ₹2 order
-  5. rounding      whole dollars by default (--cents for cents); the rounding
-                   dollar goes to the biggest position that is not capped
+  5. rounding      whole rupees by default (--cents for cents); the rounding
+                   rupee goes to the biggest position that is not capped
   6. whole shares  with --whole-shares or "fractional": false; needs prices
 
 Money that cannot be invested is reported as "left idle", never hidden.
@@ -75,8 +75,8 @@ DEFAULTS = {
     "no_entries_after": "14:45",
     "flat_by": "15:15",
     "fractional": False,
-    "broker": "alpaca",
-    "paper": True,
+    "broker": "groww",
+    "paper": False,
     "blocked": [],
     "allow_options": False,
     "allow_margin": False,
@@ -266,12 +266,12 @@ def shares_for(inr, per_share):
 
 
 def _price(x):
-    """358.32 -> "358.32": Alpaca wants prices as strings."""
+    """358.32 -> "358.32": the order format keeps prices as strings."""
     return "%.2f" % round_cent(x)
 
 
 def _num(x):
-    """1250 -> "1250", 1118.13 -> "1118.13" (Alpaca wants these as strings)."""
+    """1250 -> "1250", 1118.13 -> "1118.13" (the order format keeps these as strings)."""
     x = round(float(x), 2)
     if abs(x - round(x)) < 0.005:
         return str(int(round(x)))
@@ -401,7 +401,7 @@ def size_trade(plan, cfg, budget=None, limit=None, price=None, cash=None, today=
 
 
 def bracket_order(s):
-    """The one proposed order, Alpaca place_stock_order fields (strings) plus why and plan."""
+    """The one proposed order, in the pack's order format (strings) plus why and plan."""
     if s["refusal"] or s["qty"] <= 0:
         return None
     o = {"symbol": s["symbol"], "side": "buy", "qty": str(int(s["qty"])), "type": s["order_type"],
@@ -456,7 +456,7 @@ def plan_report(s, order, notes=()):
                     _price(s["risk_per_share"]), money(s["max_loss"])))
     lines.append("A stop is an order, not a promise: in a fast market it can fill below %s." % _price(s["stop"]))
     lines.append("")
-    lines.append("Proposed bracket order (place_stock_order arguments, nothing has been placed):")
+    lines.append("Proposed bracket order (the pack's order format; trader-broker turns it into Groww calls; nothing has been placed):")
     how = "limit %s" % order["limit_price"] if order["type"] == "limit" else "market"
     lines.append("  buy %s %s, %s, day, take-profit %s, stop-loss %s"
                  % (order["qty"], order["symbol"], how, order["take_profit_limit_price"],
@@ -667,7 +667,7 @@ def size(rows, cfg, budget=None, prices=None, whole=None, cents=False, top=None)
 
 
 def orders_from(result, source=""):
-    """Weights mode: proposed buy orders, one per position, in place_stock_order shape."""
+    """Weights mode: proposed buy orders, one per position, in the pack's order format."""
     out = []
     for p in result["positions"]:
         if p["dollars"] <= 0:
@@ -698,7 +698,7 @@ def report(result, orders, source=""):
                     money(r["investable"]), _num(r["max_position_pct"]), money(r["cap"])))
     lines.append("")
     has_price = any("price" in p for p in r["positions"])
-    head = "%-7s %-22s %8s %11s" % ("ticker", "name", "weight", "dollars")
+    head = "%-7s %-22s %8s %11s" % ("ticker", "name", "weight", "rupees")
     if has_price:
         head += " %10s %10s" % ("price", "shares")
     lines.append(head + "  note")
@@ -720,7 +720,7 @@ def report(result, orders, source=""):
     for d in r["dropped"]:
         lines.append("Dropped %s: %s" % (d["ticker"], d["reason"]))
     lines.append("")
-    lines.append("Proposed orders (place_stock_order arguments, nothing has been placed):")
+    lines.append("Proposed orders (the pack's order format; nothing has been placed):")
     for o in orders:
         amount = ("notional \"%s\"" % o["notional"]) if "notional" in o else ("qty \"%s\"" % o["qty"])
         lines.append("  %s %s %s, %s, %s" % (o["side"], o["symbol"], amount, o["type"], o["time_in_force"]))
@@ -742,7 +742,7 @@ def write_orders(path, orders, cfg, source="", now_utc=None):
         "created_by": "trader-budget",
         "created_at": utc_iso(now_utc),
         "status": "proposed",
-        "paper": bool(cfg.get("paper", True)),
+        "paper": bool(cfg.get("paper", False)),
         "note": ("Proposals only. Nothing is placed until trader-risk passes each order "
                  "and you say yes to it in the chat."),
         "source": source,
@@ -867,7 +867,7 @@ def main(argv=None):
     g.add_argument("--targets", help="a weights file: {\"weights\": [{\"ticker\", \"weight\"}]}")
     g.add_argument("--top", type=int, help="keep only the N biggest weights")
     g.add_argument("--whole-shares", action="store_true", help="whole shares only (needs --prices)")
-    g.add_argument("--cents", action="store_true", help="size to the cent instead of whole dollars")
+    g.add_argument("--cents", action="store_true", help="size to the paisa instead of whole rupees")
     a = ap.parse_args(argv)
     try:
         cfg = load_config(a.config)

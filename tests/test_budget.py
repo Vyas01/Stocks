@@ -23,7 +23,7 @@ CONTRACT_CFG = {
     "max_loss_per_trade_inr": 50, "max_daily_loss_inr": 150, "max_trades_per_day": 3, "max_orders_per_day": 10,
     "min_reward_risk": 1.0, "require_stop": True,
     "no_entries_before": "09:30", "no_entries_after": "14:45", "flat_by": "15:15",
-    "fractional": False, "broker": "alpaca", "paper": True, "blocked": [],
+    "fractional": False, "broker": "groww", "paper": False, "blocked": [],
     "allow_options": False, "allow_margin": False, "allow_short": False, "pdt_guard": False,
     "sec_user_agent": "Your Name you@example.com",
 }
@@ -130,7 +130,7 @@ class TheReel(unittest.TestCase):
             with open(out) as fh:
                 doc = json.load(fh)
             self.assertEqual(doc["status"], "proposed")
-            self.assertIs(doc["paper"], True)
+            self.assertIs(doc["paper"], False)
             self.assertEqual(doc["created_at"], "2026-10-19T04:30:00Z")
             self.assertEqual(len(doc["orders"]), 1)
             self.assertEqual(doc["orders"][0]["plan"]["max_loss"], 46.88)

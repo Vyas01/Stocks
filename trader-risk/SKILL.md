@@ -61,7 +61,7 @@ batch that is fine order by order but breaks a limit together is caught.
 
 | check | blocks when |
 | --- | --- |
-| format | no symbol, side not buy or sell, both or neither of qty and notional, a notional order that is not market + day (Alpaca's rule), a limit order with no limit price; a bracket that is not whole shares, not `day` or `gtc`, or misses its stop-loss or take-profit |
+| format | no symbol, side not buy or sell, both or neither of qty and notional, a notional order that is not market + day (trader-broker also refuses any notional order: Groww needs whole shares), a limit order with no limit price; a bracket that is not whole shares, not `day` or `gtc`, or misses its stop-loss or take-profit |
 | asset | an option symbol while `allow_options` is false; crypto or anything that is not a US stock or ETF ticker |
 | short | a sell of more than you hold (`allow_short` false) |
 | blocked | (entries) the ticker is on the `blocked` list |
@@ -93,10 +93,10 @@ How the numbers work:
   Set both `no_entries_*` to null to switch the window off.
 - **pdt_guard** (off by default) counts a day trade as a symbol bought and
   sold on the same day in the log, plus any entry placed today (it is meant
-  to be flat by the close). FINRA removed the ₹25,000 pattern-day-trader
+  to be flat by the close). FINRA removed the $25,000 pattern-day-trader
   minimum (Regulatory Notice 26-10, effective June 4, 2026; firms may phase
   in until October 20, 2027), so some brokers still apply the old rule: turn
-  `pdt_guard` on if yours does.
+  `pdt_guard` on if yours does. It is a US rule: it does not apply to Groww or the NSE, so leave it off there.
 
 Warnings do not block, but say them to the user: a LIVE account, a number
 sent as a number instead of a string, a stop that lives only in the plan and
@@ -120,15 +120,17 @@ not at the broker, a price too old to use.
 ## Example: the reel
 
 The TSLA bracket from trader-budget at 10:00 AM on Monday 2026-10-19, on a
-fresh ₹5,000 paper account with the example config:
+fresh ₹5,000 account with the example config:
 
 ```
+WARNING: LIVE account ("paper": false): these orders use real money
+
 PASS  #1 buy TSLA 8 shares, entry
           entry 364.18 (the plan's entry), stop 358.32, target 370.04: risk 5.86 a share
           max loss ₹46.88 (limit ₹50), reward:risk 1.00 (min 1)
           today before this: 0 of 3 trades, ₹0 of ₹150 daily loss
 
-1 passed, 0 blocked at 2026-10-19 10:00 India. Cash after the passed orders: ₹2,086.56 (paper account).
+1 passed, 0 blocked at 2026-10-19 10:00 India. Cash after the passed orders: ₹2,086.56 (LIVE account).
 ```
 
 One more share and it is blocked:
@@ -163,10 +165,12 @@ treats a PASS as the user's yes.
 ## Safety
 
 - Education and tooling, not financial advice. A PASS is a rules check, not a recommendation.
-- Paper trading by default (`"paper": true`). Going live is the user's own decision, in their own config.
+- Groww has no paper mode: every order this pack sends is a real order with real money. To rehearse, run the
+  whole flow and answer no at the yes step.
 - Nothing in this pack places an order except trader-broker, and only when all three hold: trader-risk
   passed that exact order today, the user typed an explicit yes for that one order in the chat, and the
   user clicked Allow once on Claude's own card because the order tool is set to "Needs approval"
   (Customize > Connectors > tool permissions). Never set an order tool to "Always allow".
 - No options, margin, short selling or leverage unless the config allows it and the user confirms.
-- Broker keys live in environment variables or the Claude Desktop config, never in the chat.
+- Groww logins, API keys and TOTP secrets stay in Groww's own sign-in page or the user's own environment,
+  never in the chat.

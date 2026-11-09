@@ -98,7 +98,7 @@ class TheReel(unittest.TestCase):
         self.assertEqual(r["value_inr"], 2913.44)
         self.assertEqual(res["cash_after"], 2086.56)
         self.assertEqual(res["date"], TODAY)
-        self.assertIs(res["paper"], True)
+        self.assertIs(res["paper"], False)   # Groww has no paper mode
 
     def test_nine_shares_is_blocked_by_the_max_loss_only(self):
         res = check.check([tsla(qty="9")], cfg(), now=at(NOW))
@@ -112,7 +112,7 @@ class TheReel(unittest.TestCase):
         self.assertEqual(check.fingerprint(dict(o, why="anything", plan={})), check.fingerprint(o))
         self.assertNotEqual(check.fingerprint(dict(o, qty="9")), check.fingerprint(o))
         self.assertNotEqual(check.fingerprint(dict(o, stop_loss_stop_price="358.00")), check.fingerprint(o))
-        self.assertEqual(check.ALPACA_FIELDS, ticket.ALPACA_FIELDS)
+        self.assertEqual(check.ORDER_FIELDS, ticket.ORDER_FIELDS)
 
     def test_cli(self):
         with tempfile.TemporaryDirectory() as d:

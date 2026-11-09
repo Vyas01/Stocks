@@ -2,7 +2,7 @@
 name: trader-timemachine
 description: >-
   Time Machine. Replays every possible outcome of a trade before you risk a
-  dollar: 10,000 simulated sessions plus every past time the setup fired.
+  rupee: 10,000 simulated sessions plus every past time the setup fired.
   Takes the plan from trader-exit (entry, stop, target), rebuilds the rest of
   the day 10,000 times from the stock's own 5-minute bars over the last 60
   days, and re-runs the same rule on every past session. Prints the odds of
@@ -159,10 +159,12 @@ into the pool.
 ## Safety
 
 - Education and tooling, not financial advice. A PASS is a rules check, not a recommendation.
-- Paper trading by default (`"paper": true`). Going live is the user's own decision, in their own config.
+- Groww has no paper mode: every order this pack sends is a real order with real money. To rehearse, run the
+  whole flow and answer no at the yes step.
 - Nothing in this pack places an order except trader-broker, and only when all three hold: trader-risk
   passed that exact order today, the user typed an explicit yes for that one order in the chat, and the
   user clicked Allow once on Claude's own card because the order tool is set to "Needs approval"
   (Customize > Connectors > tool permissions). Never set an order tool to "Always allow".
 - No options, margin, short selling or leverage unless the config allows it and the user confirms.
-- Broker keys live in environment variables or the Claude Desktop config, never in the chat.
+- Groww logins, API keys and TOTP secrets stay in Groww's own sign-in page or the user's own environment,
+  never in the chat.

@@ -81,8 +81,7 @@ closes, so it changes nothing and "flat by close" at 15:15 rings at 15:15 every 
   and for checking a size, not for timing an order. The broker's price is the
   one that fills. Each price in `trader/prices.json` keeps its quote time, and
   trader-risk only uses one under 15 minutes old.
-- If both are down, read the price from the broker connector (Alpaca
-  `get_stock_snapshot`, IBKR `get_price_snapshot`) and write it into
+- If both are down, read the price from the Groww connector's quote tool and write it into
   `trader/prices.json` as `{"as_of": "...Z", "prices": {"TSLA": 366.48}}`.
 
 ## The NSE clock
@@ -111,7 +110,7 @@ list is unknown (the 2027 list is not published yet).
    rules and rings each alert once. A check reads the latest delayed quote;
    it is not a live feed, and a price can pass a level between two checks.
 3. Tell the user what rang in one line each. A stop or target alert means the
-   bracket order has probably filled: check `get_open_position` and record the
+   bracket order has probably filled: check Groww (`get_positions_for_user`) and record the
    fill with trader-broker. "Flat by close" means close anything still open:
    trader-broker `flatten`, then trader-risk, then the user's yes. Never act
    for them.
@@ -152,10 +151,12 @@ live, and never predicts where a price is going.
 ## Safety
 
 - Education and tooling, not financial advice. A PASS is a rules check, not a recommendation.
-- Paper trading by default (`"paper": true`). Going live is the user's own decision, in their own config.
+- Groww has no paper mode: every order this pack sends is a real order with real money. To rehearse, run the
+  whole flow and answer no at the yes step.
 - Nothing in this pack places an order except trader-broker, and only when all three hold: trader-risk
   passed that exact order today, the user typed an explicit yes for that one order in the chat, and the
   user clicked Allow once on Claude's own card because the order tool is set to "Needs approval"
   (Customize > Connectors > tool permissions). Never set an order tool to "Always allow".
 - No options, margin, short selling or leverage unless the config allows it and the user confirms.
-- Broker keys live in environment variables or the Claude Desktop config, never in the chat.
+- Groww logins, API keys and TOTP secrets stay in Groww's own sign-in page or the user's own environment,
+  never in the chat.

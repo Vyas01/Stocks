@@ -10,7 +10,7 @@ SKILLS = ["trader-scanner", "trader-news", "trader-entry", "trader-exit", "trade
           "trader-risk", "trader-budget", "trader-broker", "trader-alerts", "trader-analyst",
           "trader-pelosi"]
 ABOUT = ("11 Claude skills for day trading: scan thousands of charts, track breaking news, time every "
-         "entry and exit, and replay every outcome before you risk a dollar.")
+         "entry and exit, and replay every outcome before you risk a rupee.")
 # skills on the way to an order carry the safety block
 ORDER_PATH = ["trader-scanner", "trader-entry", "trader-exit", "trader-timemachine", "trader-budget",
               "trader-pelosi", "trader-risk", "trader-broker", "trader-alerts"]
@@ -128,10 +128,11 @@ class Repo(unittest.TestCase):
         self.assertIs(cfg.get("allow_short", False), False)
         self.assertIs(cfg.get("allow_margin", False), False)
 
-    def test_paper_trading_is_the_default(self):
+    def test_groww_is_the_broker_and_there_is_no_paper_mode(self):
         with open(os.path.join(ROOT, "trader-budget", "config.example.json")) as fh:
             cfg = json.load(fh)
-        self.assertIs(cfg["paper"], True)
+        self.assertEqual(cfg["broker"], "groww")
+        self.assertIs(cfg["paper"], False)      # Groww's API docs show no paper or sandbox mode
         self.assertIs(cfg.get("allow_options", False), False)
 
 

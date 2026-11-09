@@ -5,7 +5,8 @@ This tool never talks to a broker and never places anything. It does its
 work around the one moment that matters, your yes:
 
   show      renders each proposed order as a plain-English ticket plus the
-            exact JSON Claude will send to Alpaca's place_stock_order tool.
+            exact Groww calls Claude will make (place_order, then for a bracket
+            an OCO smart order).
             A bracket order shows its stop-loss, take-profit and the max loss
             at the stop. An order is READY only if trader-risk passed THIS
             exact order today (matched by fingerprint) and nobody has decided
@@ -15,7 +16,7 @@ work around the one moment that matters, your yes:
             different stock or amount, and any order that is not READY.
   decline   records a no.
   result    records what happened after the Allow once / Deny card:
-            placed (with the broker's order id), denied, or failed.
+            placed (with Groww's order id), denied, or failed.
   fill      records a fill in trader/portfolio.json (cash and shares).
   flatten   builds a sell ticket that closes a symbol's open position by
             flat_by. It still goes through trader-risk and your yes.
@@ -24,9 +25,9 @@ work around the one moment that matters, your yes:
     python3 ticket.py show                    # every order, READY or not
     python3 ticket.py show --index 1 --json   # one ticket as JSON
     python3 ticket.py approve --index 1 --reply "yes"
-    python3 ticket.py result --index 1 --status placed --broker-id 61e6...
-    python3 ticket.py fill --symbol TSLA --side buy --qty 8 --price 364.20
-    python3 ticket.py flatten --symbol TSLA --qty 8
+    python3 ticket.py result --index 1 --status placed --broker-id GMK3...
+    python3 ticket.py fill --symbol RELIANCE.NS --side buy --qty 8 --price 2950.20
+    python3 ticket.py flatten --symbol RELIANCE.NS --qty 8
     python3 ticket.py log
 
 Everything is written to trader/state/broker.json (append only). Dates are
@@ -41,7 +42,9 @@ import os
 import re
 import sys
 
-ALPACA_FIELDS = ("symbol", "side", "qty", "notional", "type", "time_in_force", "limit_price",
+# the pack's own order format (trader-budget writes it, trader-risk checks it). The names mirror Alpaca's
+# place_stock_order, where the format started; trader-broker turns it into Groww calls.
+ORDER_FIELDS = ("symbol", "side", "qty", "notional", "type", "time_in_force", "limit_price",
                  "stop_price", "trail_price", "trail_percent", "extended_hours", "client_order_id",
                  "order_class", "take_profit_limit_price", "stop_loss_stop_price",
                  "stop_loss_limit_price", "advanced_instructions")
@@ -128,7 +131,7 @@ def rec_day(rec):
 
 def fingerprint(order):
     """Same function as trader-risk/check.py: identifies the exact order."""
-    core = {k: order[k] for k in ALPACA_FIELDS if k in order and order[k] is not None}
+    core = {k: order[k] for k in ORDER_FIELDS if k in order and order[k] is not None}
     blob = json.dumps(core, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -149,15 +152,89 @@ def _f(x):
         return None
 
 
-def tool_input(order):
-    """The exact arguments for place_stock_order: Alpaca's parameter names,
-    numbers as strings (its signature types qty, notional and prices as str).
-    "why" and "plan" are ours and are never sent."""
-    out = {}
-    for k in ALPACA_FIELDS:
-        if k in order and order[k] is not None:
-            out[k] = _str_num(order[k]) if k in STRING_FIELDS else order[k]
-    return out
+# Groww Trading API values (groww.in/trade-api/docs, read 2026-11-09). Every day trade here is an NSE cash-segment
+# intraday order: product MIS, validity DAY. Groww's docs show no paper or sandbox mode: every order is real money.
+GROWW_EXCHANGE, GROWW_SEGMENT, GROWW_PRODUCT, GROWW_VALIDITY = "NSE", "CASH", "MIS", "DAY"
+GROWW_ORDER_TYPES = {"market": "MARKET", "limit": "LIMIT", "stop": "SL_M", "stop_limit": "SL"}
+
+
+def groww_symbol(sym):
+    """RELIANCE.NS -> RELIANCE. Groww wants the exchange's trading symbol, without Yahoo's .NS."""
+    s = str(sym or "").strip().upper()
+    if not s.endswith(".NS") or len(s) <= 3:
+        raise TicketError("Groww orders here are NSE stocks written SYMBOL.NS (like RELIANCE.NS); %r is not one" % sym)
+    return s[:-3]
+
+
+def _whole(q):
+    f = _f(q)
+    if f is None or f <= 0 or f != int(f):
+        raise TicketError("Groww takes whole shares; a quantity of %r is not one" % (q,))
+    return int(f)
+
+
+def _rs(v):
+    """A price as Groww's smart-order fields want it: a decimal string, like "2950.50"."""
+    return "%.2f" % float(v)
+
+
+def _ref(prefix, order):
+    """order_reference_id / reference_id: 8 to 20 letters and digits, at most two hyphens. The same order always
+    gets the same id, so a repeated call cannot place it twice."""
+    return "%s-%s" % (prefix, fingerprint(order)[:14])
+
+
+def groww_calls(order):
+    """The Groww calls for one order, in the order they are made. Method and field names are the Groww Trading
+    API's (place_order, create_smart_order); prices are rupees. "why" and "plan" are ours and are never sent.
+    A bracket is two calls: the intraday entry, then an OCO (target + stop-loss) on the position once it fills."""
+    if order.get("notional") is not None:
+        raise TicketError("Groww needs a whole-share quantity, not a rupee amount (notional)")
+    typ = str(order.get("type", "market")).lower()
+    if typ not in GROWW_ORDER_TYPES:
+        raise TicketError("order type %r is not one this pack sends to Groww (market, limit, stop, stop_limit)" % typ)
+    if str(order.get("time_in_force", "day")).lower() != "day":
+        raise TicketError("intraday (MIS) orders on Groww are day orders; this one is %r" % order.get("time_in_force"))
+    side = str(order.get("side", "")).lower()
+    if side not in ("buy", "sell"):
+        raise TicketError("side must be buy or sell, not %r" % order.get("side"))
+    sym, qty = groww_symbol(order.get("symbol")), _whole(order.get("qty"))
+    args = {"trading_symbol": sym, "quantity": qty, "validity": GROWW_VALIDITY, "exchange": GROWW_EXCHANGE,
+            "segment": GROWW_SEGMENT, "product": GROWW_PRODUCT, "order_type": GROWW_ORDER_TYPES[typ],
+            "transaction_type": side.upper(), "order_reference_id": _ref("dt", order)}
+    if typ in ("limit", "stop_limit"):
+        if _f(order.get("limit_price")) is None:
+            raise TicketError("a %s order needs a limit_price" % typ)
+        args["price"] = _f(order["limit_price"])
+    if typ in ("stop", "stop_limit"):
+        if _f(order.get("stop_price")) is None:
+            raise TicketError("a %s order needs a stop_price" % typ)
+        args["trigger_price"] = _f(order["stop_price"])
+    calls = [{"method": "place_order", "when": "now", "args": args}]
+    if is_bracket(order):
+        tp, sl = order.get("take_profit_limit_price"), order.get("stop_loss_stop_price")
+        if side != "buy" or tp is None or sl is None:
+            raise TicketError("a bracket here is a BUY with both a take-profit and a stop-loss")
+        stop_leg = {"trigger_price": _rs(sl), "order_type": "SL_M", "price": None}
+        if order.get("stop_loss_limit_price") is not None:
+            stop_leg = {"trigger_price": _rs(sl), "order_type": "SL", "price": _rs(order["stop_loss_limit_price"])}
+        oco = {"smart_order_type": "OCO", "reference_id": _ref("oco", order), "segment": GROWW_SEGMENT,
+               "trading_symbol": sym, "quantity": qty, "product_type": GROWW_PRODUCT, "exchange": GROWW_EXCHANGE,
+               "duration": GROWW_VALIDITY, "net_position_quantity": qty, "transaction_type": "SELL",
+               "target": {"trigger_price": _rs(tp), "order_type": "LIMIT", "price": _rs(tp)}, "stop_loss": stop_leg}
+        calls.append({"method": "create_smart_order",
+                      "when": "only after the entry has filled; set quantity and net_position_quantity to the "
+                              "shares actually filled", "args": oco})
+    return calls
+
+
+def calls_error(order):
+    """None if the Groww calls can be built, else the plain reason they cannot."""
+    try:
+        groww_calls(order)
+    except TicketError as e:
+        return str(e)
+    return None
 
 
 def _money(v):
@@ -177,7 +254,7 @@ def is_bracket(order):
 
 
 def max_loss(order):
-    """(dollars, stop) lost if the stop fills exactly at the stop, or (None, stop)."""
+    """(rupees, stop) lost if the stop fills exactly at the stop, or (None, stop)."""
     stop = _f(order.get("stop_loss_stop_price")) or _f((order.get("plan") or {}).get("stop"))
     q = _f(order.get("qty"))
     if not stop or not q:
@@ -319,8 +396,11 @@ def status_of(order, risk, state, today):
     if rec:
         st = rec.get("status")
         if st == "approved":
-            return False, "APPROVED by you at %s, waiting for the place_stock_order call" % rec.get("at"), rv
+            return False, "APPROVED by you at %s, waiting for the Groww place_order call" % rec.get("at"), rv
         return False, "DONE: %s at %s" % (st, rec.get("at")), rv
+    bad = calls_error(order)
+    if bad:
+        return False, "NOT READY: cannot build the Groww call: " + bad, rv
     return True, "READY: trader-risk PASS, waiting for your yes", rv
 
 
@@ -333,12 +413,25 @@ def kind_of(order, rv):
 
 # ---------------------------------------------------------------- rendering
 
+def render_calls(order):
+    """The Groww calls as text lines, for a ticket."""
+    calls = groww_calls(order)
+    lines = []
+    for n, c in enumerate(calls, 1):
+        head = "Claude will call %s with exactly:" % c["method"] if len(calls) == 1 else \
+            "Step %d of %d, %s (%s), with exactly:" % (n, len(calls), c["method"], c["when"])
+        lines.append("  " + head)
+        for l in json.dumps(c["args"], indent=2).splitlines():
+            lines.append("    " + l)
+    if len(calls) > 1:
+        lines.append("  Groww holds the stop-loss and the take-profit as one OCO pair: when one fills, the other is")
+        lines.append("  canceled. The OCO can only be set on a position you already hold, so it comes after the fill.")
+    return lines
+
+
 def render(order, idx, total, cfg, risk, state, today):
     ready, label, rv = status_of(order, risk, state, today)
-    broker = str(cfg.get("broker", "alpaca")).lower()
-    paper = cfg.get("paper", True)
-    acct = "PAPER account" if paper else "LIVE ACCOUNT, REAL MONEY"
-    lines = ["ORDER %d of %d, %s, %s" % (idx, total, acct, "Interactive Brokers" if broker == "ibkr" else "Alpaca")]
+    lines = ["ORDER %d of %d, LIVE ACCOUNT, REAL MONEY, Groww (NSE, intraday MIS)" % (idx, total)]
     for part in plain_parts(order):
         lines.append("  " + part)
     if order.get("why"):
@@ -346,30 +439,22 @@ def render(order, idx, total, cfg, risk, state, today):
     lines.append("  " + label)
     for w in (rv or {}).get("warnings", []):
         lines.append("  note: " + w)
-    if broker == "ibkr":
-        lines.append("  Claude drafts this with the Interactive Brokers connector. IBKR sends it to your")
-        lines.append("  IBKR account, and it only goes to the market after you approve it there.")
-    else:
-        lines.append("  Claude will call place_stock_order with exactly:")
-        for l in json.dumps(tool_input(order), indent=2).splitlines():
-            lines.append("    " + l)
-        if is_bracket(order):
-            lines.append("  Alpaca places the entry, then the stop-loss and the take-profit as two orders")
-            lines.append("  that cancel each other: when one fills, the other is canceled.")
+    if calls_error(order) is None:
+        lines.extend(render_calls(order))
     if ready:
+        lines.append("  Groww has no paper mode: this is a real order with real money.")
         lines.append("  Reply \"yes\" to place this one order, or \"no\" to skip it.")
-        if broker != "ibkr":
-            lines.append("  Claude's own card then asks again: Allow once places it, Deny stops it.")
+        lines.append("  Claude's own card then asks again: Allow once places it, Deny stops it.")
     return "\n".join(lines), ready
 
 
 def ticket_json(order, idx, cfg, risk, state, today):
     ready, label, rv = status_of(order, risk, state, today)
     loss, stop = max_loss(order)
+    bad = calls_error(order)
     return {"index": idx, "ready": ready, "status": label, "plain": plain(order),
-            "fingerprint": fingerprint(order), "paper": bool(cfg.get("paper", True)),
-            "broker": cfg.get("broker", "alpaca"), "tool": "place_stock_order",
-            "tool_input": tool_input(order), "why": order.get("why", ""),
+            "fingerprint": fingerprint(order), "paper": False, "broker": "groww",
+            "calls": None if bad else groww_calls(order), "calls_error": bad, "why": order.get("why", ""),
             "bracket": is_bracket(order), "max_loss": loss, "stop": stop}
 
 
@@ -496,17 +581,18 @@ def cmd_approve(a):
            "symbol": str(order.get("symbol", "")).upper(), "side": order.get("side"),
            "qty": order.get("qty"), "kind": kind_of(order, rv), "max_loss": loss, "stop": stop,
            "plain": plain(order), "status": "approved", "reply": a.reply,
-           "paper": bool(cfg.get("paper", True)), "broker": cfg.get("broker", "alpaca")}
+           "paper": False, "broker": "groww"}
     state.setdefault("orders", []).append(rec)
     write_json(a.state, state)
     print("Recorded your yes for order %d: %s." % (a.index, plain(order)))
-    if str(cfg.get("broker", "alpaca")).lower() == "ibkr":
-        print("Now draft it with the Interactive Brokers connector; approve it in your IBKR account.")
-    else:
-        print("Now call place_stock_order with exactly:")
-        print(json.dumps(tool_input(order), indent=2))
-        print("Claude's card shows Allow once / Deny. Then: ticket.py result --index %d --status "
-              "placed|denied|failed" % a.index)
+    calls = groww_calls(order)
+    print("Now send it to Groww. Use exactly these values; if a Groww tool cannot take one (the product MIS, a")
+    print("trigger price), stop and tell the user. Never drop a field or change it to make a call work.")
+    for n, c in enumerate(calls, 1):
+        print("%s%s (%s):" % ("Step %d of %d, " % (n, len(calls)) if len(calls) > 1 else "", c["method"], c["when"]))
+        print(json.dumps(c["args"], indent=2))
+    print("Claude's card shows Allow once / Deny. Then: ticket.py result --index %d --status "
+          "placed|denied|failed" % a.index)
     return 0
 
 
@@ -550,6 +636,12 @@ def cmd_result(a):
               % (rec["symbol"], rec["side"]))
         if rec.get("kind") == "entry" and is_bracket(order):
             print("When the stop-loss or the take-profit fills later, record that sell the same way.")
+    if a.status == "placed" and rec.get("kind") == "entry" and is_bracket(order):
+        n = a.filled_qty or "the shares filled"
+        print("Next, step 2: once the entry has filled, call create_smart_order (the OCO) with the values the ticket")
+        print("printed, quantity and net_position_quantity set to %s. Until then the position has no stop at Groww." % n)
+        print("Needs the user's Allow once on Claude's card, like any order tool. If the OCO fails, tell the user")
+        print("at once and offer to close the position: they are holding it with no stop.")
     return 0
 
 
@@ -571,7 +663,7 @@ def cmd_flatten(a):
     cfg = read_json(a.config, "config", required=False) or {}
     sym = a.symbol.strip().upper()
     now, today = _clock(a)
-    source = "the broker, get_open_position"
+    source = "Groww, get_positions_for_user"
     if a.qty is not None:
         qty = _f(a.qty)
         if qty is None or qty <= 0:
@@ -582,8 +674,8 @@ def cmd_flatten(a):
                   if str(p.get("ticker") or p.get("symbol") or "").upper() == sym)
         source = a.portfolio
         if qty <= 1e-9:
-            raise TicketError("nothing to flatten: no %s shares in %s. Check the broker (get_open_position "
-                              "%s) and pass --qty if you do hold some" % (sym, a.portfolio, sym))
+            raise TicketError("nothing to flatten: no %s shares in %s. Check Groww (get_positions_for_user) "
+                              "and pass --qty if you do hold some" % (sym, a.portfolio))
     plan = read_json(a.plan, "plan", required=False) or {}
     flat_by = (plan.get("flat_by") if str(plan.get("symbol", "")).upper() == sym else None) \
         or cfg.get("flat_by") or "15:15"
@@ -593,7 +685,7 @@ def cmd_flatten(a):
     old = read_json(a.orders, "orders", required=False)
     replaced = len(old.get("orders", [])) if isinstance(old, dict) else 0
     doc = {"created_by": "trader-broker", "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "status": "proposed",
-           "paper": bool(cfg.get("paper", True)),
+           "paper": False,
            "note": "Flatten ticket. Nothing is placed until trader-risk passes it and you say yes in the chat.",
            "source": "ticket.py flatten %s on %s" % (sym, today), "orders": [order]}
     write_json(a.orders, doc)
@@ -601,14 +693,14 @@ def cmd_flatten(a):
     print("Wrote it to %s%s." % (a.orders, (" (it replaced %d earlier proposal%s)"
                                              % (replaced, "" if replaced == 1 else "s")) if replaced else ""))
     if a.qty is None:
-        print("The qty comes from %s. Check it against get_open_position %s before you say yes." % (source, sym))
+        print("The qty comes from %s. Check it against Groww (get_position_for_trading_symbol) before you say yes." % source)
     print("Next:")
     print("  1. trader-risk: check.py. A sell that only closes what you hold is never blocked by the daily")
     print("     limits or the entry window.")
     print("  2. ticket.py show, then the user's yes for this one order.")
-    print("  3. If the bracket's stop-loss and take-profit are still open, Alpaca holds these shares for them")
-    print("     and rejects a new sell. Cancel them first: get_orders (status open, nested true), then")
-    print("     cancel_order_by_id for each open leg (Needs approval). Then place_stock_order with the ticket.")
+    print("  3. If the OCO (stop-loss and take-profit) is still active at Groww, cancel it first so it cannot also sell:")
+    print("     cancel_smart_order(segment=CASH, smart_order_type=OCO, smart_order_id=...), which needs the user's")
+    print("     Allow once. Then place_order with the ticket (a market SELL, product MIS), then ticket.py result.")
     return 0
 
 
@@ -688,7 +780,7 @@ def main(argv=None):
     p.add_argument("--state", default="trader/state/broker.json")
     p = sub.add_parser("flatten", help="a sell ticket that closes a symbol's position by flat_by")
     p.add_argument("--symbol", required=True)
-    p.add_argument("--qty", help="shares you hold, from get_open_position (default: trader/portfolio.json)")
+    p.add_argument("--qty", help="shares you hold, from Groww get_positions_for_user (default: trader/portfolio.json)")
     p.add_argument("--orders", default="trader/orders.json", help="where the ticket is written")
     p.add_argument("--portfolio", default="trader/portfolio.json")
     p.add_argument("--plan", default="trader/plan.json")

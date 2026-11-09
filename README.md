@@ -1,6 +1,6 @@
 # The Day Trader skill
 
-11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar.
+11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a rupee.
 
 Free, MIT, no signup, no API key. The tools are plain Python that read free
 public data: Yahoo Finance charts, the NSE's equity list, SEC EDGAR
@@ -9,12 +9,12 @@ and the House Clerk.
 One scans thousands of charts for setups. Another tracks breaking news on
 every stock you watch. One watches a setup bar by bar and tells you the moment
 to get in, and another sets your stop and your target before you do. And the
-craziest one is the Time Machine: before you risk a dollar, it replays the
+craziest one is the Time Machine: before you risk a rupee, it replays the
 rest of the session 10,000 times from the stock's own recent bars, plus every
 past day the same setup fired, and tells you the honest odds.
 
 And no trade goes through until you say yes. Nothing in this pack can place
-an order on its own. Paper trading is the default.
+an order on its own. Groww has no paper mode, so every order is real money.
 
 > **Looking for the original Trader skill?** Copy an investor's 13F, the
 > stock screener, tax lots and rebalancing live in
@@ -70,11 +70,18 @@ This pack is set up for the National Stock Exchange of India:
 - **Every trade is closed by 3:15 PM** (`flat_by`). Entries are allowed from
   9:30 AM (after the 15-minute opening range) to 2:45 PM (`no_entries_before`
   and `no_entries_after`); change any of them in `trader/config.json`.
-- **Not changed:** amounts are still shown with `$`, the news and earnings
-  skills still read US sources (Yahoo headlines, SEC EDGAR), the Pelosi
-  tracker is US Congress, and `/trader-broker` still builds Alpaca-shaped
-  tickets. Alpaca is a US broker and does not trade the NSE, so use the
-  ticket as a plan and place the order in your Indian broker yourself.
+- **Money** is in rupees (₹). The limits in `config.example.json` are
+  `max_order_inr`, `max_loss_per_trade_inr` and so on; the old `*_usd` names
+  still load. The example amounts (a ₹5,000 budget, a ₹50 max loss per trade)
+  are placeholders: set your own.
+- **Broker is Groww.** `/trader-broker` turns each approved order into Groww's
+  calls: an intraday (MIS) `place_order`, then an OCO smart order for the stop
+  and the target once it fills. It works through Groww's official MCP server
+  or the `growwapi` SDK (see `trader-broker/SKILL.md`). Groww has no paper
+  mode, so every order is real money.
+- **Not changed:** the news and earnings skills still read US sources (Yahoo
+  headlines, SEC EDGAR), and the Pelosi tracker is US Congress and stays in
+  dollars.
 
 ## The eleven
 
@@ -84,10 +91,10 @@ This pack is set up for the National Stock Exchange of India:
 | `/trader-news` | News Monitor | Tracks breaking news on every stock you watch and flags what moves it. |
 | `/trader-entry` | Entry Timer | Watches a setup bar by bar and tells you the moment to get in. |
 | `/trader-exit` | Exit Planner | Sets your stop and your target before you enter, so you know when to get out. |
-| `/trader-timemachine` | Time Machine | Replays every possible outcome of a trade before you risk a dollar: 10,000 simulated sessions plus every past time the setup fired. |
+| `/trader-timemachine` | Time Machine | Replays every possible outcome of a trade before you risk a rupee: 10,000 simulated sessions plus every past time the setup fired. |
 | `/trader-risk` | Risk Manager | Checks every trade against your limits and stops anything over them. |
 | `/trader-budget` | Budget Manager | Sizes every position to your budget and your max loss per trade. |
-| `/trader-broker` | Order Executor | Sends approved orders to your broker, paper trading by default, never without your yes. |
+| `/trader-broker` | Order Executor | Sends approved orders to your Groww account, never without your yes. No paper mode: every order is real money. |
 | `/trader-alerts` | Price Alerts | Rings when a price, a stop or the opening bell hits. |
 | `/trader-analyst` | Earnings Analyst | Reads earnings reports and sums up what changed. |
 | `/trader-pelosi` | Pelosi Tracker | Reads Congress's stock-trade disclosures the minute they are filed. |
@@ -125,7 +132,7 @@ moved onto the NSE's 9:15 to 3:30 session (India time) for this walkthrough.
    29.4 %, stop first 25.5 %, still open at the close 45.1 %. It also re-ran
    the same rule on those 59 real sessions: it fired 33 times, 13 hit the
    target, 15 the stop, 5 neither. Its verdict: close to a coin flip. That is
-   the point of looking before you risk a dollar.
+   the point of looking before you risk a rupee.
 6. **`/trader-budget`** with a ₹5,000 account and a ₹50 max loss per trade:
    50 / 5.86 = 8 shares (₹2,913.44). If the stop fills at 358.32, the loss is
    ₹46.88. It writes one bracket order: buy 8 TSLA, stop-loss 358.32,
@@ -134,9 +141,8 @@ moved onto the NSE's 9:15 to 3:30 session (India time) for this walkthrough.
    loss limit, trades per day, reward to risk, the entry window, position
    size and cash. PASS or BLOCK, with the reason.
 8. **`/trader-broker`** shows you the ticket in plain words. You type yes for
-   that exact order. Claude calls your brokerage connector (Alpaca's MCP
-   server, paper account by default), and Claude's own "Allow once / Deny"
-   card asks you one more time.
+   that exact order. Claude sends it to Groww (the official MCP server, or the
+   SDK), and Claude's own "Allow once / Deny" card asks you one more time.
 9. **`/trader-alerts`** rings on the stop, the target and at 3:15 PM to
    flatten whatever is still open.
 
@@ -189,9 +195,10 @@ yes for it in the chat. Set your brokerage tool to "Needs approval" in Claude
 own "Allow once / Deny" card is a second check. No options, margin, short
 selling or leverage unless you turn them on.
 
-**Paper first.** `"paper": true` is the default in `config.example.json`, and
-Alpaca's MCP server defaults to its paper account. Keys live in environment
-variables, never in the chat.
+**No paper mode.** Groww's API documentation shows no paper or sandbox
+account, so `"paper"` is false and every order is real. To rehearse, run the
+whole flow and answer no at the yes step. Logins, keys and TOTP secrets stay
+in Groww's sign-in page or your own environment, never in the chat.
 
 **The Time Machine is a simulation, not a prediction.** It is built from the
 stock's own last 60 days of 5-minute bars. The future can do things those 60
@@ -207,13 +214,14 @@ official API: it can lag, change or rate-limit you. The scanner and the entry
 timer read 1-minute or 5-minute bars, not every tick. Check anything that
 matters against your broker before you act on it.
 
-**Day-trading rules.** FINRA removed the ₹25,000 pattern-day-trader minimum
+**Day-trading rules (US only).** FINRA removed the $25,000 pattern-day-trader minimum
 on June 4, 2026 (Regulatory Notice 26-10), and brokers may phase the change
 in until October 20, 2027, so yours may still apply the old rule. If it does,
-set `"pdt_guard": true` and `/trader-risk` counts your day trades.
+set `"pdt_guard": true` and `/trader-risk` counts your day trades. This is a US rule
+about US brokers: it does not apply to Groww or the NSE, so leave `pdt_guard` false there.
 
 **Congress's trades are public, not inside information.** Members must disclose
-trades over ₹1,000 within 45 days (the STOCK Act). The Pelosi skill reads those
+trades over $1,000 within 45 days (the STOCK Act). The Pelosi skill reads those
 public filings the minute they post.
 
 **Taxes.** Day-trading gains are short-term gains, and frequent trading makes
@@ -229,7 +237,7 @@ trader-exit/        SKILL.md, exit.py
 trader-timemachine/ SKILL.md, timemachine.py
 trader-risk/        SKILL.md, check.py
 trader-budget/      SKILL.md, size.py, config.example.json, targets.example.json
-trader-broker/      SKILL.md, ticket.py, claude_desktop_config.example.json
+trader-broker/      SKILL.md, ticket.py, groww_mcp.example.json
 trader-alerts/      SKILL.md, alerts.py, alerts.example.json
 trader-analyst/     SKILL.md, facts.py, metrics.example.json
 trader-pelosi/      SKILL.md, ptr.py

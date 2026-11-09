@@ -6,13 +6,14 @@ description: >-
   the whole shares that fit inside four limits (max loss per trade, position
   cap, max order, cash after your buffer), says which limit decided it, and
   writes ONE bracket order (entry, stop-loss, take-profit) to
-  trader/orders.json in the exact shape of Alpaca's place_stock_order. A stop
+  trader/orders.json in the pack's order format (field names as in Alpaca's place_stock_order;
+  trader-broker turns it into Groww calls). A stop
   too far away for your max loss is a plain refusal, not a smaller order.
   Nothing is placed. Use when the user says "how many shares", "size this
   trade", "how much should I buy", "I have ₹5,000", "I only want to risk ₹50
   a trade", "set my rules", "keep 10% in cash", or after /trader-exit writes
   a plan.
-argument-hint: "[budget in dollars]"
+argument-hint: "[budget in rupees]"
 ---
 
 # trader-budget
@@ -61,7 +62,7 @@ If `trader/config.json` does not exist, copy `config.example.json` into
   **min_reward_risk** (1.0), **require_stop** (true), **no_entries_before** / **no_entries_after**
   ("09:30" / "14:45") and **flat_by** ("15:15"), all India time.
 - **blocked**: tickers they never want to trade.
-- Keep **paper** true until they have watched it work on a paper account.
+- **paper** is false: Groww has no paper mode. Let the user watch a few sessions with no orders placed first.
 
 ## Step 2: size the trade
 
@@ -69,7 +70,7 @@ If `trader/config.json` does not exist, copy `config.example.json` into
 python3 "${CLAUDE_SKILL_DIR}/size.py" --write
 ```
 
-Whole shares only: Alpaca takes no fractions in a bracket order. The size is
+Whole shares only: Groww takes no fractions. The size is
 the smallest of four limits:
 
 | limit | shares |
@@ -92,7 +93,7 @@ the reason to the user in one line.
 
 ## Step 3: show the user
 
-Show the four limits, which one decided the size, the shares, the dollars
+Show the four limits, which one decided the size, the shares, the rupees
 and the max loss at the stop. Say plainly that a stop is an order, not a
 promise: in a fast market it can fill below the stop. Then hand over to
 `/trader-risk`.
@@ -121,7 +122,7 @@ share. The example config: ₹5,000 budget, 10% cash buffer, ₹50 max loss.
 ```
 
 `why` and `plan` are notes for trader-risk and trader-broker. They are never
-sent to Alpaca. With the stop at 300.00 instead, one share would risk 64.18,
+sent to Groww. With the stop at 300.00 instead, one share would risk 64.18,
 more than the ₹50 max loss: no order. At 10:37 the real quote was 366.48, so
 the same plan sizes to 6 shares at 8.16 a share, and reward:risk falls to
 0.44: refused, because the move it was waiting for has mostly happened.
@@ -132,7 +133,7 @@ the same plan sizes to 6 shares at 8.16 a share, and reward:risk falls to
 here) splits a budget across a list by weight: the cash buffer comes off the
 top, weights are renormalised to 100, any stock over `max_position_pct` is
 pinned at the cap and its excess shared out, slices under the minimum order
-are dropped, and amounts round to whole dollars so nothing is left idle by
+are dropped, and amounts round to whole rupees so nothing is left idle by
 accident. With `"max_position_pct": 25` and `"fractional": true`, the example
 file gives AAPL ₹1,250 (capped), AXP ₹1,119, GOOGL ₹823, KO ₹708, BAC ₹600.
 With `"fractional": false` (the example config) it buys whole shares and
@@ -157,10 +158,12 @@ margin or short positions.
 ## Safety
 
 - Education and tooling, not financial advice. A PASS is a rules check, not a recommendation.
-- Paper trading by default (`"paper": true`). Going live is the user's own decision, in their own config.
+- Groww has no paper mode: every order this pack sends is a real order with real money. To rehearse, run the
+  whole flow and answer no at the yes step.
 - Nothing in this pack places an order except trader-broker, and only when all three hold: trader-risk
   passed that exact order today, the user typed an explicit yes for that one order in the chat, and the
   user clicked Allow once on Claude's own card because the order tool is set to "Needs approval"
   (Customize > Connectors > tool permissions). Never set an order tool to "Always allow".
 - No options, margin, short selling or leverage unless the config allows it and the user confirms.
-- Broker keys live in environment variables or the Claude Desktop config, never in the chat.
+- Groww logins, API keys and TOTP secrets stay in Groww's own sign-in page or the user's own environment,
+  never in the chat.
