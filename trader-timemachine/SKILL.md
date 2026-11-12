@@ -53,9 +53,14 @@ bars), `--offline FILE` (a saved Yahoo chart JSON, `.json` or `.json.gz`),
 
 ## How it works
 
-1. **The pool.** It keeps only FULL sessions before the plan's date: all 75
-   five-minute bars, 9:15 to 3:30 India time. Short days, gaps and today
-   are left out. Every bar becomes four ratios to the bar before it:
+1. **The pool.** It keeps the sessions before the plan's date that have
+   every five-minute bar from 9:15 to the end of the replay (3:15 PM by
+   default). Yahoo often has no bars for an NSE stock's last 10 to 15
+   minutes, which comes after the flat-by time, so missing bars there do not
+   count against a session and the report says so. A gap before the end of
+   the replay, short days and today are still left out. If the data stops
+   earlier than the `--until` time, the tool says how far it goes and what
+   `--until` to use. Every bar becomes four ratios to the bar before it:
    open, high, low and close over the previous close.
 2. **One replay.** Start at the entry price. For each bar left in the day,
    pick a past bar from the same time of day (plus or minus 2 bars) at
@@ -79,7 +84,10 @@ bars), `--offline FILE` (a saved Yahoo chart JSON, `.json` or `.json.gz`),
    15 points: "Leans toward the target" or "Leans toward the stop". 15 or
    more: "Strongly toward" one of them. So a 2R plan with target first
    24.1 % and stop first 50.5 % is close to break-even (it needs 33 % of
-   the 74.6 % that hit a side, and got 32 %), not a loser.
+   the 74.6 % that hit a side, and got 32 %), not a loser. When fewer than
+   10 % of the replays reach either the target or the stop, there is no lean
+   to report: the verdict says "Neither the target nor the stop is likely to
+   be reached" and that they may be too far away for the time left.
 6. **Below the verdict**, when it applies: a line when more than 40 % of the
    replays hit neither (the price at `--until` decides those), and the
    average R when its sign goes against the lean. Those can only point the

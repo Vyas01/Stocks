@@ -16,8 +16,12 @@ session in the data.
 
 How the replays work (the reel's sim.py, same algorithm, same random draws):
   1. Fetch 60 days of 5-minute bars (Yahoo v8 chart, range=60d interval=5m;
-     one request). Keep only FULL sessions before the plan's date: 75 bars,
-     9:15 AM to 3:30 PM India time. Half days, gaps and today are left out.
+     one request). Keep only the sessions before the plan's date that have every
+     5-minute bar from 9:15 AM to the end of the replay (3:15 PM by default).
+     Yahoo often has no bars for the last 10 to 15 minutes of an NSE stock's day,
+     which comes after the flat-by time and does not matter, so those missing
+     tail bars no longer disqualify a session. A gap before the end of the replay,
+     short days and today are still left out.
   2. The pool: for every bar slot 1..74 of the day, each past session's bar as
      ratios to the previous bar's close: (open, high, low, close) / prev close.
   3. One replay starts at the entry price and walks the rest of the session.
@@ -94,6 +98,7 @@ HIST_BINS = 24
 COIN_FLIP = 0.05     # verdict thresholds, see the docstring
 STRONG = 0.15
 MANY_NEITHER = 0.40
+THIN_SIDES = 0.10    # under 10 % of replays reach the target or the stop: say so, do not call a lean
 EPOCH = datetime.datetime(1970, 1, 1)
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 NSE_EARLY_CLOSE = {}  # the NSE has no early closes
@@ -296,16 +301,26 @@ def split_sessions(bars):
     return days
 
 
-def full_sessions(days, before):
-    """Full sessions (all 78 bars) strictly before the plan's date, oldest first,
-    and the short ones that were left out (half days, gaps)."""
+def lead(s):
+    """How many bars a session has in a row from the open (slot 0, 1, 2 ...)."""
+    n = 0
+    while n in s:
+        n += 1
+    return n
+
+
+def full_sessions(days, before, need=SESSION_BARS):
+    """Sessions strictly before the plan's date, oldest first, that have every bar from the open to bar
+    need - 1 (the whole day by default), each as its bars in a row from the open. The rest are returned
+    as short (half days, gaps): {"date", "bars": how many bars it had}."""
     full, short = [], []
     for d in sorted(days):
         if d >= before:
             continue
         s = days[d]
-        if len(s) == SESSION_BARS:
-            full.append((d, [s[i] for i in range(SESSION_BARS)]))
+        n = lead(s)
+        if n >= need:
+            full.append((d, [s[i] for i in range(n)]))
         else:
             short.append({"date": d, "bars": len(s)})
     return full, short
@@ -314,10 +329,12 @@ def full_sessions(days, before):
 # ---------------------------------------------------------------- the simulation (sim.py)
 
 def build_pool(sessions):
-    """pool[i] = every past session's bar i as (o, h, l, c) / bar i-1's close, in date order."""
-    pool = [[] for _ in range(SESSION_BARS)]
+    """pool[i] = every past session's bar i as (o, h, l, c) / bar i-1's close, in date order. The pool runs
+    as far as the bars that every session has (the whole day when the data is complete)."""
+    n = min(len(D) for _, D in sessions)
+    pool = [[] for _ in range(n)]
     for _, D in sessions:
-        for i in range(1, SESSION_BARS):
+        for i in range(1, n):
             pc = D[i - 1]["c"]
             pool[i].append((D[i]["o"] / pc, D[i]["h"] / pc, D[i]["l"] / pc, D[i]["c"] / pc))
     return pool
@@ -333,8 +350,10 @@ def simulate(pool, entry, stop, target, k, last, replays=10000, seed=19, window=
     risk = (entry - stop) if long else (stop - entry)
     r_target = round(((target - entry) if long else (entry - target)) / risk, 4)
 
+    top = len(pool) - 1
+
     def slot(rng, i):
-        return i if window == 0 else min(SESSION_BARS - 1, max(1, i + rng.randint(-window, window)))
+        return i if window == 0 else min(top, max(1, i + rng.randint(-window, window)))
 
     rng = random.Random(seed)
     choice = rng.choice
@@ -620,6 +639,12 @@ def lean(mc):
     return share - even, share, even
 
 
+def thin(mc):
+    """True when under THIN_SIDES of the replays reached the target or the stop: a lean between two rare
+    events says little, so the verdict says that instead."""
+    return lean(mc) is not None and mc["p_target"] + mc["p_stop"] < THIN_SIDES
+
+
 def verdict(mc):
     """One line from the numbers, see the docstring for the thresholds."""
     pt, ps = mc["p_target"], mc["p_stop"]
@@ -630,6 +655,10 @@ def verdict(mc):
     d, share, even = lv
     r = mc.get("r_at_target") or 1.0
     one_r = abs(r - 1.0) < 0.005
+    if thin(mc):
+        return ("Neither the target nor the stop is likely to be reached by %s (target first %.1f %% vs stop "
+                "first %.1f %%): the price at %s decides almost every replay. They may be too far away for the "
+                "time left." % (_until12(mc), 100 * pt, 100 * ps, _until12(mc)))
     if abs(d) < COIN_FLIP:
         head = "Close to a coin flip" if one_r else "Close to break-even"
     elif abs(d) < STRONG:
@@ -647,6 +676,8 @@ def verdict_notes(mc):
     """The lines printed right below the verdict, so nothing reads as one-sided."""
     notes = []
     pn = mc.get("p_neither", 0)
+    if thin(mc):
+        return notes
     if pn > MANY_NEITHER and lean(mc) is not None:
         notes.append("%.1f %% of the replays hit neither by %s; the price at %s decides those."
                      % (100 * pn, _until12(mc), _until12(mc)))
@@ -697,10 +728,16 @@ def time_machine(text, plan, now_utc, replays=10000, seed=19, window=2, until=No
     if not eb["l"] - 0.01 <= plan["entry"] <= eb["h"] + 0.01:
         warn.append("the plan's entry %.2f is outside that bar's range %.2f to %.2f"
                     % (plan["entry"], eb["l"], eb["h"]))
-    sessions, short = full_sessions(days, plan["date"])
+    sessions, short = full_sessions(days, plan["date"], last + 1)
     if len(sessions) < MIN_SESSIONS:
-        raise TMError("only %d full session(s) of %s before %s in the data; the time machine needs at least %d"
-                      % (len(sessions), sym, plan["date"], MIN_SESSIONS))
+        leads = sorted((lead(v) for d, v in days.items() if d < plan["date"]), reverse=True)
+        hint = ""
+        if len(leads) >= MIN_SESSIONS and leads[MIN_SESSIONS - 1] >= k + 2:
+            hint = ("; %d or more sessions have bars up to %s, so try --until %s or earlier"
+                    % (MIN_SESSIONS, clock24(OPEN_MIN + 5 * leads[MIN_SESSIONS - 1]),
+                       clock24(OPEN_MIN + 5 * leads[MIN_SESSIONS - 1])))
+        raise TMError("only %d session(s) of %s before %s have every bar up to %s; the time machine needs at "
+                      "least %d%s" % (len(sessions), sym, plan["date"], clock12(until_min), MIN_SESSIONS, hint))
     pool = build_pool(sessions)
     mc = simulate(pool, plan["entry"], plan["stop"], plan["target"], k, last, replays, seed, window, plan["side"])
     mc = dict(mc, until=clock24(until_min), pool_sessions=len(sessions), pool_from=sessions[0][0],
@@ -722,7 +759,8 @@ def time_machine(text, plan, now_utc, replays=10000, seed=19, window=2, until=No
         "source": source,
         "data": {"symbol": msym or sym, "interval": "5m", "range": "60d",
                  "last_bar": "%s %s IST" % (last_bar["date"], last_bar["start"]),
-                 "dropped": dropped, "short_sessions_left_out": short},
+                 "dropped": dropped, "short_sessions_left_out": short,
+                 "pool_bars": min(len(v) for _, v in sessions)},
         "plan": plan_out,
         "mc": mc,
         "history": history,
@@ -788,6 +826,11 @@ def report(doc):
         lines.append("Left out %d short session(s) (half days or gaps): %s."
                      % (len(doc["data"]["short_sessions_left_out"]),
                         ", ".join(x["date"] for x in doc["data"]["short_sessions_left_out"])))
+    pb = doc["data"].get("pool_bars")
+    if pb and pb < SESSION_BARS:
+        lines.append("Note: Yahoo has no bars for this stock after %s. That is after your flat-by time, so it does "
+                     "not change the replay; a draw that would land on a missing bar uses the last bar it has."
+                     % clock24(OPEN_MIN + 5 * pb))
     lines.append(doc["note"] + " Repeat this run with --seed %d." % m["seed"])
     return lines
 

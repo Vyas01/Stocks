@@ -70,6 +70,20 @@ def keep_bars(result, keep):
         q[k] = [q[k][i] for i in idx]
 
 
+def null_bars(result, drop):
+    """Yahoo-style gaps: the bar is there, its prices are null, where drop(ts) is true."""
+    q = result["indicators"]["quote"][0]
+    for i, ts in enumerate(result["timestamp"]):
+        if drop(ts):
+            for k in ("open", "high", "low", "close"):
+                q[k][i] = None
+
+
+def minute_of_day(ts):
+    e = et(ts)
+    return e.hour * 60 + e.minute
+
+
 def et(ts):
     return tm.to_eastern(tm.utc_of(ts))
 
@@ -267,7 +281,8 @@ class Bars(unittest.TestCase):
             keep_bars(res, lambda ts: et(ts).date().isoformat() >= "2026-09-22")
         with self.assertRaises(tm.TMError) as cm:
             machine(text=edited(trim))
-        self.assertIn("only 19 full session(s)", str(cm.exception))
+        self.assertIn("only 19 session(s)", str(cm.exception))
+        self.assertIn("have every bar up to 3:15 PM", str(cm.exception))
         self.assertIn("at least 20", str(cm.exception))
 
         def twenty(res):
@@ -631,6 +646,65 @@ class DotNs(unittest.TestCase):
         self.assertEqual(doc["plan"]["symbol"], "BAJAJ-AUTO.NS")
         with self.assertRaises(tm.TMError):
             machine(plan(symbol="RELIANCE.NS"), text=text, replays=200)       # the data is for another symbol
+
+
+
+class RealNseGaps(unittest.TestCase):
+    """Yahoo has no prices for an NSE stock's last bars (15:20, 15:25 and often 15:15) in every session."""
+
+    @staticmethod
+    def no_tail(res):
+        null_bars(res, lambda ts: minute_of_day(ts) >= 15 * 60 + 15)
+
+    def test_missing_tail_bars_do_not_disqualify_a_session(self):
+        doc = machine(text=edited(self.no_tail), replays=300)
+        self.assertEqual(doc["mc"]["pool_sessions"], 59)                  # the same 59 sessions as the full data
+        self.assertEqual(doc["data"]["short_sessions_left_out"], [])
+        self.assertEqual(doc["data"]["pool_bars"], 72)                    # bars 0 to 71: up to the 15:10 bar
+        m = doc["mc"]
+        self.assertAlmostEqual(m["p_target"] + m["p_stop"] + m["p_neither"], 1.0, places=6)
+        self.assertEqual(m["until"], "15:15")
+        self.assertEqual(doc["history"]["triggered"], 33)                 # the history replay never needed them
+        text = "\n".join(tm.report(doc))
+        self.assertIn("Yahoo has no bars for this stock after 15:15", text)
+        self.assertNotIn("Left out", text)
+
+    def test_full_data_is_unchanged(self):
+        doc = machine(replays=300)
+        self.assertEqual(doc["data"]["pool_bars"], 75)
+        self.assertNotIn("Yahoo has no bars", "\n".join(tm.report(doc)))
+
+    def test_a_gap_before_the_end_still_disqualifies_that_session(self):
+        def gaps(res):
+            self.no_tail(res)
+            null_bars(res, lambda ts: et(ts).date().isoformat() == "2026-09-10" and minute_of_day(ts) == 11 * 60 + 45)
+        doc = machine(text=edited(gaps), replays=300)
+        self.assertEqual(doc["mc"]["pool_sessions"], 58)
+        self.assertEqual([x["date"] for x in doc["data"]["short_sessions_left_out"]], ["2026-09-10"])
+        self.assertIn("Left out 1 short session", "\n".join(tm.report(doc)))
+
+    def test_until_past_the_data_says_what_to_do(self):
+        with self.assertRaises(tm.TMError) as cm:
+            machine(text=edited(self.no_tail), until="15:30", replays=10)
+        self.assertIn("have every bar up to 3:30 PM", str(cm.exception))
+        self.assertIn("try --until 15:15 or earlier", str(cm.exception))
+
+
+class ThinVerdict(unittest.TestCase):
+    def test_almost_everything_ending_neither_is_not_called_a_lean(self):
+        mc = {"p_target": 0.0, "p_stop": 0.005, "p_neither": 0.995, "until": "15:15", "r_at_target": 2.0,
+              "avg_R": -0.01}
+        v = tm.verdict(mc)
+        self.assertTrue(v.startswith("Neither the target nor the stop is likely to be reached by 3:15 PM"), v)
+        self.assertIn("target first 0.0 % vs stop first 0.5 %", v)
+        self.assertIn("too far away for the time left", v)
+        self.assertNotIn("Strongly", v)
+        self.assertEqual(tm.verdict_notes(mc), [])
+
+    def test_a_real_lean_is_still_called_a_lean(self):
+        mc = {"p_target": 0.02, "p_stop": 0.30, "p_neither": 0.68, "until": "15:15", "r_at_target": 2.0, "avg_R": 0.0}
+        self.assertTrue(tm.verdict(mc).startswith("Strongly toward the stop"))
+        self.assertEqual(len(tm.verdict_notes(mc)), 1)
 
 
 if __name__ == "__main__":
